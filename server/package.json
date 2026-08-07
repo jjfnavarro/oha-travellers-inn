@@ -12,6 +12,7 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:seed": "prisma db seed",
+    "users:seed": "tsx prisma/seed-users.ts",
     "prisma:studio": "prisma studio"
   },
   "prisma": {
@@ -19,16 +20,22 @@
   },
   "dependencies": {
     "@prisma/client": "^6.2.1",
+    "bcryptjs": "^3.0.2",
+    "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^5.0.1",
     "helmet": "^8.0.0",
+    "pdfkit": "^0.16.0",
+    "write-excel-file": "^4.1.1",
     "zod": "^3.24.1"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",
+    "@types/cookie-parser": "^1.4.8",
     "@types/express": "^5.0.0",
     "@types/node": "^22.10.5",
+    "@types/pdfkit": "^0.13.8",
     "@types/supertest": "^6.0.2",
     "prisma": "^6.2.1",
     "supertest": "^7.0.0",

@@ -1,6 +1,7 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
 import { Router } from 'express';
 import { z } from 'zod';
+import { requireOwner } from '../middleware/auth.js';
 
 const rateSchema = z.object({
   durationHours: z.number().int().positive().max(24),
@@ -38,7 +39,7 @@ export function createRoomTypesRouter(prisma: PrismaClient): Router {
     response.json({ data: roomTypes });
   });
 
-  router.post('/', async (request, response) => {
+  router.post('/', requireOwner, async (request, response) => {
     const result = roomTypeSchema.safeParse(request.body);
     if (!result.success) {
       response.status(400).json({ message: validationMessage(result.error) });
@@ -69,7 +70,7 @@ export function createRoomTypesRouter(prisma: PrismaClient): Router {
     }
   });
 
-  router.patch('/:id', async (request, response) => {
+  router.patch('/:id', requireOwner, async (request, response) => {
     const id = z.coerce.number().int().positive().safeParse(request.params.id);
     const body = roomTypeSchema.safeParse(request.body);
     if (!id.success || !body.success) {
@@ -95,6 +96,14 @@ export function createRoomTypesRouter(prisma: PrismaClient): Router {
         });
       });
       response.json({ data: roomType });
+      await prisma.auditLog.create({
+        data: {
+          staffId: request.authUser?.id,
+          action: 'RATE_UPDATE',
+          entityType: 'ROOM_TYPE',
+          entityId: String(id.data),
+        },
+      });
     } catch (error: unknown) {
       if (
         error instanceof Prisma.PrismaClientKnownRequestError &&

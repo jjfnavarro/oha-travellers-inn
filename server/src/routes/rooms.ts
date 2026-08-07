@@ -1,10 +1,12 @@
 import {
   Prisma,
   RoomOperationalStatus,
+  StaffRole,
   type PrismaClient,
 } from '@prisma/client';
 import { Router } from 'express';
 import { z } from 'zod';
+import { requireOwner } from '../middleware/auth.js';
 
 const roomSchema = z.object({
   number: z.string().trim().min(1).max(10),
@@ -21,6 +23,9 @@ const roomInclude = {
     where: { status: 'ACTIVE' as const },
     orderBy: { checkedInAt: 'desc' as const },
     take: 1,
+    include: {
+      extensions: { orderBy: { createdAt: 'asc' as const } },
+    },
   },
 };
 
@@ -56,7 +61,7 @@ export function createRoomsRouter(prisma: PrismaClient): Router {
     response.json({ data: room });
   });
 
-  router.post('/', async (request, response) => {
+  router.post('/', requireOwner, async (request, response) => {
     const result = roomSchema.safeParse(request.body);
     if (!result.success) {
       response.status(400).json({
@@ -102,6 +107,15 @@ export function createRoomsRouter(prisma: PrismaClient): Router {
       });
       return;
     }
+    if (
+      request.authUser?.role === StaffRole.FRONT_DESK &&
+      Object.keys(body.data).some((key) => key !== 'operationalStatus')
+    ) {
+      response.status(403).json({
+        message: 'Front-desk accounts can only change operational status.',
+      });
+      return;
+    }
     try {
       if (body.data.operationalStatus !== undefined) {
         const activeStay = await prisma.stay.findUnique({
@@ -131,6 +145,15 @@ export function createRoomsRouter(prisma: PrismaClient): Router {
         where: { id: id.data },
         data,
         include: roomInclude,
+      });
+      await prisma.auditLog.create({
+        data: {
+          staffId: request.authUser?.id,
+          action: 'ROOM_STATUS_UPDATE',
+          entityType: 'ROOM',
+          entityId: String(room.id),
+          details: { operationalStatus: room.operationalStatus },
+        },
       });
       response.json({ data: room });
     } catch (error: unknown) {

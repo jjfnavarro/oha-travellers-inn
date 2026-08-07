@@ -1,8 +1,17 @@
 # OHA Traveller's Inn Management System
 
-This repository contains the technical foundation, room inventory, and active-stay workflow for OHA Traveller's Inn. The React client reaches the Express API, which manages room and check-in data in MySQL through Prisma.
+This repository contains the technical foundation and front-desk workflows through staff authentication, audit history, room inventory, active stays, reports, and automatic shifts.
 
-Reservations, reports, shifts, staff login, refunds, and overdue charges are not implemented yet.
+Reservations, bookings, refunds, discounts, adjustments, expenses, other income, and overdue charges are not implemented yet. Staff login and initial Owner/Front Desk authorization were completed in Milestone 5. Milestone 6 adds Cash/GCash payment records and paid stay extensions.
+
+## Development Roadmap
+
+The completed work is documented in `docs/milestone-1.md` through `docs/milestone-5.md`.
+
+- Milestone 6 establishes permanent staff attribution and an immutable financial transaction ledger. The current scope supports Owner and Front Desk accounts, Cash/GCash room charges, and paid stay extensions; the `ADMIN` role remains deferred.
+- Milestone 7 will add Owner-only overall and per-staff reporting, period and shift filters, financial and operational breakdowns, activity history, and matching PDF and Excel exports.
+
+Milestone 7 remains documented future work. Its reporting APIs and user interface have not been implemented yet.
 
 ## Prerequisites
 
@@ -69,6 +78,22 @@ npm run prisma:seed
 
 The seed command adds the 28 rooms and room rates provided by the owner. It is safe to run again because it updates the known inventory instead of duplicating it.
 
+To create the three staff accounts, set private passwords of at least eight characters in `server/.env`:
+
+```text
+OWNER_INITIAL_PASSWORD=your-private-owner-password
+DAY_STAFF_INITIAL_PASSWORD=your-private-day-password
+NIGHT_STAFF_INITIAL_PASSWORD=your-private-night-password
+```
+
+Then run:
+
+```powershell
+npm.cmd run users:seed
+```
+
+This creates `Zack`, `Dodong`, and `Along`. Clear the three password values from `server/.env` afterward; the stored database passwords are securely hashed.
+
 Prisma Migrate uses the separate `oha_travellers_inn_shadow` database configured for local development. The Docker initialization script creates it automatically on a new MySQL volume.
 
 ## Start The Applications
@@ -111,6 +136,8 @@ System Connected
 ```
 
 The Rooms view displays all 28 configured rooms and their live occupancy. Employees can check guests in, check them out early, and monitor countdowns, five-minute warnings, and overdue stays. Select **Enable sound** once per browser session to permit audible warnings. The Rates view displays and edits offered stay durations.
+
+Stay History provides date, room, room-type, status, and arrival filters. Reports use the motel's 8:00 AM operational-day boundary and support browser printing, PDF downloads, and Excel downloads. Day and Night shift records are assigned automatically using `Asia/Manila`.
 
 ## Quality Checks
 

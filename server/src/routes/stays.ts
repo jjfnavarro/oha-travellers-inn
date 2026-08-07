@@ -1,5 +1,7 @@
 import {
   ArrivalType,
+  FinancialTransactionType,
+  PaymentMethod,
   Prisma,
   RoomOperationalStatus,
   StayStatus,
@@ -7,6 +9,8 @@ import {
 } from '@prisma/client';
 import { Router } from 'express';
 import { z } from 'zod';
+import { getShiftWindow } from '../services/shift-time.js';
+import { calculateExtendedCheckout } from '../services/stay-extension.js';
 
 const checkInSchema = z.object({
   roomId: z.number().int().positive(),
@@ -15,6 +19,12 @@ const checkInSchema = z.object({
   guestName: z.string().trim().max(100).optional().nullable(),
   plateNumber: z.string().trim().max(30).optional().nullable(),
   notes: z.string().trim().max(500).optional().nullable(),
+  paymentMethod: z.enum([PaymentMethod.CASH, PaymentMethod.GCASH]),
+});
+
+const extensionSchema = z.object({
+  durationHours: z.number().int().positive().max(24),
+  paymentMethod: z.enum([PaymentMethod.CASH, PaymentMethod.GCASH]),
 });
 
 const stayInclude = {
@@ -24,6 +34,12 @@ const stayInclude = {
         include: { rates: { orderBy: { durationHours: 'asc' as const } } },
       },
     },
+  },
+  checkedInBy: { select: { id: true, username: true } },
+  checkedOutBy: { select: { id: true, username: true } },
+  extensions: {
+    include: { createdBy: { select: { id: true, username: true } } },
+    orderBy: { createdAt: 'asc' as const },
   },
 };
 
@@ -40,6 +56,50 @@ export function createStaysRouter(prisma: PrismaClient): Router {
       where: { status: StayStatus.ACTIVE },
       include: stayInclude,
       orderBy: { expectedCheckoutAt: 'asc' },
+    });
+    response.json({ data: stays });
+  });
+
+  router.get('/history', async (request, response) => {
+    const query = z
+      .object({
+        from: z.coerce.date().optional(),
+        to: z.coerce.date().optional(),
+        roomId: z.coerce.number().int().positive().optional(),
+        roomTypeId: z.coerce.number().int().positive().optional(),
+        status: z.nativeEnum(StayStatus).optional(),
+        arrivalType: z.nativeEnum(ArrivalType).optional(),
+      })
+      .safeParse(request.query);
+    if (!query.success) {
+      response
+        .status(400)
+        .json({ message: 'One or more history filters are invalid.' });
+      return;
+    }
+
+    const stays = await prisma.stay.findMany({
+      where: {
+        ...(query.data.from || query.data.to
+          ? {
+              checkedInAt: {
+                ...(query.data.from ? { gte: query.data.from } : {}),
+                ...(query.data.to ? { lte: query.data.to } : {}),
+              },
+            }
+          : {}),
+        ...(query.data.roomId ? { roomId: query.data.roomId } : {}),
+        ...(query.data.roomTypeId
+          ? { room: { roomTypeId: query.data.roomTypeId } }
+          : {}),
+        ...(query.data.status ? { status: query.data.status } : {}),
+        ...(query.data.arrivalType
+          ? { arrivalType: query.data.arrivalType }
+          : {}),
+      },
+      include: { ...stayInclude, shift: true },
+      orderBy: { checkedInAt: 'desc' },
+      take: 500,
     });
     response.json({ data: stays });
   });
@@ -86,13 +146,21 @@ export function createStaysRouter(prisma: PrismaClient): Router {
           }
 
           const checkedInAt = new Date();
+          const shiftWindow = getShiftWindow(checkedInAt);
+          const shift = await transaction.shift.upsert({
+            where: { startsAt: shiftWindow.startsAt },
+            update: { type: shiftWindow.type, endsAt: shiftWindow.endsAt },
+            create: shiftWindow,
+          });
           const expectedCheckoutAt = new Date(
             checkedInAt.getTime() + result.data.durationHours * 60 * 60 * 1000,
           );
 
-          return transaction.stay.create({
+          const stay = await transaction.stay.create({
             data: {
               roomId: room.id,
+              shiftId: shift.id,
+              checkedInById: request.authUser?.id,
               activeRoomId: room.id,
               status: StayStatus.ACTIVE,
               arrivalType: result.data.arrivalType,
@@ -107,6 +175,31 @@ export function createStaysRouter(prisma: PrismaClient): Router {
             },
             include: stayInclude,
           });
+
+          await transaction.financialTransaction.create({
+            data: {
+              stayId: stay.id,
+              handledById: request.authUser.id,
+              transactionType: FinancialTransactionType.ROOM_CHARGE,
+              amountCentavos: rate.amountCentavos,
+              paymentMethod: result.data.paymentMethod,
+            },
+          });
+          await transaction.auditLog.create({
+            data: {
+              staffId: request.authUser.id,
+              action: 'CHECK_IN',
+              entityType: 'STAY',
+              entityId: String(stay.id),
+              details: {
+                roomId: stay.roomId,
+                durationHours: stay.durationHours,
+                amountCentavos: rate.amountCentavos,
+                paymentMethod: result.data.paymentMethod,
+              },
+            },
+          });
+          return stay;
         },
         { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
       );
@@ -129,6 +222,100 @@ export function createStaysRouter(prisma: PrismaClient): Router {
     }
   });
 
+  router.post('/:id/extensions', async (request, response) => {
+    const id = z.coerce.number().int().positive().safeParse(request.params.id);
+    const body = extensionSchema.safeParse(request.body);
+    if (!id.success || !body.success) {
+      response
+        .status(400)
+        .json({ message: 'Select a valid extension and payment method.' });
+      return;
+    }
+
+    try {
+      const stay = await prisma.$transaction(
+        async (transaction) => {
+          const activeStay = await transaction.stay.findFirst({
+            where: { id: id.data, status: StayStatus.ACTIVE },
+            include: {
+              room: { include: { roomType: { include: { rates: true } } } },
+            },
+          });
+          if (!activeStay) {
+            throw new StayRuleError('This stay is no longer active.', 409);
+          }
+          const rate = activeStay.room.roomType.rates.find(
+            (item) => item.durationHours === body.data.durationHours,
+          );
+          if (!rate) {
+            throw new StayRuleError(
+              'The selected extension is not offered for this room type.',
+              400,
+            );
+          }
+
+          const previousExpectedCheckoutAt = activeStay.expectedCheckoutAt;
+          const extendedExpectedCheckoutAt = calculateExtendedCheckout(
+            previousExpectedCheckoutAt,
+            body.data.durationHours,
+          );
+          await transaction.stayExtension.create({
+            data: {
+              stayId: activeStay.id,
+              createdById: request.authUser.id,
+              durationHours: body.data.durationHours,
+              amountCentavos: rate.amountCentavos,
+              paymentMethod: body.data.paymentMethod,
+              previousExpectedCheckoutAt,
+              extendedExpectedCheckoutAt,
+            },
+          });
+          await transaction.financialTransaction.create({
+            data: {
+              stayId: activeStay.id,
+              handledById: request.authUser.id,
+              transactionType: FinancialTransactionType.EXTENSION_CHARGE,
+              amountCentavos: rate.amountCentavos,
+              paymentMethod: body.data.paymentMethod,
+            },
+          });
+          await transaction.auditLog.create({
+            data: {
+              staffId: request.authUser.id,
+              action: 'EXTEND_STAY',
+              entityType: 'STAY',
+              entityId: String(activeStay.id),
+              details: {
+                roomId: activeStay.roomId,
+                durationHours: body.data.durationHours,
+                amountCentavos: rate.amountCentavos,
+                paymentMethod: body.data.paymentMethod,
+                previousExpectedCheckoutAt,
+                extendedExpectedCheckoutAt,
+              },
+            },
+          });
+          return transaction.stay.update({
+            where: { id: activeStay.id },
+            data: {
+              expectedCheckoutAt: extendedExpectedCheckoutAt,
+              paidAmountCentavos: { increment: rate.amountCentavos },
+            },
+            include: stayInclude,
+          });
+        },
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+      );
+      response.status(201).json({ data: stay });
+    } catch (error: unknown) {
+      if (error instanceof StayRuleError) {
+        response.status(error.statusCode).json({ message: error.message });
+        return;
+      }
+      throw error;
+    }
+  });
+
   router.post('/:id/check-out', async (request, response) => {
     const id = z.coerce.number().int().positive().safeParse(request.params.id);
     if (!id.success) {
@@ -139,7 +326,12 @@ export function createStaysRouter(prisma: PrismaClient): Router {
     const checkedOutAt = new Date();
     const update = await prisma.stay.updateMany({
       where: { id: id.data, status: StayStatus.ACTIVE },
-      data: { status: StayStatus.COMPLETED, checkedOutAt, activeRoomId: null },
+      data: {
+        status: StayStatus.COMPLETED,
+        checkedOutAt,
+        activeRoomId: null,
+        checkedOutById: request.authUser?.id,
+      },
     });
     if (update.count === 0) {
       response.status(409).json({
@@ -151,6 +343,19 @@ export function createStaysRouter(prisma: PrismaClient): Router {
     const stay = await prisma.stay.findUnique({
       where: { id: id.data },
       include: stayInclude,
+    });
+    await prisma.auditLog.create({
+      data: {
+        staffId: request.authUser?.id,
+        action: 'CHECK_OUT',
+        entityType: 'STAY',
+        entityId: String(id.data),
+        details: {
+          early: Boolean(
+            stay?.checkedOutAt && stay.checkedOutAt < stay.expectedCheckoutAt,
+          ),
+        },
+      },
     });
     response.json({ data: stay });
   });

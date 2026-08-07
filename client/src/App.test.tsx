@@ -5,6 +5,7 @@ import { getOccupancyStatus } from './stay-status';
 
 afterEach(() => {
   cleanup();
+  window.localStorage.clear();
   vi.unstubAllGlobals();
 });
 
@@ -13,6 +14,11 @@ test('shows the connected state when the API and database are healthy', async ()
     'fetch',
     vi
       .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve({ data: { id: 1, username: 'Zack', role: 'OWNER' } }),
+      })
       .mockResolvedValueOnce({
         ok: true,
         json: () =>
@@ -43,12 +49,14 @@ test('shows the connected state when the API and database are healthy', async ()
   ).toBeInTheDocument();
 });
 
-test('shows a clear error when the API cannot be reached', async () => {
+test('shows the staff login when there is no authenticated session', async () => {
   vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('Network error')));
 
   render(<App />);
 
-  expect(await screen.findByText(/System unavailable/)).toBeInTheDocument();
+  expect(
+    await screen.findByRole('heading', { name: 'Staff login' }),
+  ).toBeInTheDocument();
 });
 
 test('calculates checkout-soon and overdue occupancy states', () => {

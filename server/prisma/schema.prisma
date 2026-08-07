@@ -25,6 +25,27 @@ enum ArrivalType {
   WALK_IN
 }
 
+enum ShiftType {
+  DAY
+  NIGHT
+}
+
+enum StaffRole {
+  OWNER
+  FRONT_DESK
+}
+
+enum PaymentMethod {
+  CASH
+  GCASH
+  UNKNOWN
+}
+
+enum FinancialTransactionType {
+  ROOM_CHARGE
+  EXTENSION_CHARGE
+}
+
 model RoomType {
   id          Int        @id @default(autoincrement())
   name        String     @unique @db.VarChar(50)
@@ -36,13 +57,13 @@ model RoomType {
 }
 
 model StayRate {
-  id              Int      @id @default(autoincrement())
-  roomTypeId      Int
-  durationHours   Int
-  amountCentavos  Int
-  roomType        RoomType @relation(fields: [roomTypeId], references: [id], onDelete: Cascade)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id             Int      @id @default(autoincrement())
+  roomTypeId     Int
+  durationHours  Int
+  amountCentavos Int
+  roomType       RoomType @relation(fields: [roomTypeId], references: [id], onDelete: Cascade)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   @@unique([roomTypeId, durationHours])
   @@index([roomTypeId])
@@ -64,23 +85,121 @@ model Room {
 }
 
 model Stay {
-  id                 Int         @id @default(autoincrement())
-  roomId             Int
-  activeRoomId       Int?        @unique
-  room               Room        @relation(fields: [roomId], references: [id], onDelete: Restrict)
-  status             StayStatus  @default(ACTIVE)
-  arrivalType        ArrivalType
-  guestName          String?     @db.VarChar(100)
-  plateNumber        String?     @db.VarChar(30)
-  notes              String?     @db.VarChar(500)
-  durationHours      Int
-  paidAmountCentavos Int
-  checkedInAt        DateTime    @default(now())
-  expectedCheckoutAt DateTime
-  checkedOutAt       DateTime?
-  createdAt          DateTime    @default(now())
-  updatedAt          DateTime    @updatedAt
+  id                    Int                    @id @default(autoincrement())
+  roomId                Int
+  activeRoomId          Int?                   @unique
+  room                  Room                   @relation(fields: [roomId], references: [id], onDelete: Restrict)
+  shiftId               Int?
+  shift                 Shift?                 @relation(fields: [shiftId], references: [id], onDelete: SetNull)
+  checkedInById         Int?
+  checkedInBy           StaffAccount?          @relation("CheckedInBy", fields: [checkedInById], references: [id], onDelete: Restrict)
+  checkedOutById        Int?
+  checkedOutBy          StaffAccount?          @relation("CheckedOutBy", fields: [checkedOutById], references: [id], onDelete: Restrict)
+  status                StayStatus             @default(ACTIVE)
+  arrivalType           ArrivalType
+  guestName             String?                @db.VarChar(100)
+  plateNumber           String?                @db.VarChar(30)
+  notes                 String?                @db.VarChar(500)
+  durationHours         Int
+  paidAmountCentavos    Int
+  checkedInAt           DateTime               @default(now())
+  expectedCheckoutAt    DateTime
+  checkedOutAt          DateTime?
+  extensions            StayExtension[]
+  financialTransactions FinancialTransaction[]
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
 
   @@index([roomId])
+  @@index([shiftId])
+  @@index([checkedInById])
+  @@index([checkedOutById])
   @@index([status, expectedCheckoutAt])
+}
+
+model StaffAccount {
+  id                  Int                    @id @default(autoincrement())
+  username            String                 @unique @db.VarChar(50)
+  passwordHash        String                 @db.VarChar(100)
+  role                StaffRole
+  isActive            Boolean                @default(true)
+  sessions            Session[]
+  auditLogs           AuditLog[]
+  checkedInStays      Stay[]                 @relation("CheckedInBy")
+  checkedOutStays     Stay[]                 @relation("CheckedOutBy")
+  stayExtensions      StayExtension[]
+  handledTransactions FinancialTransaction[]
+  createdAt           DateTime               @default(now())
+  updatedAt           DateTime               @updatedAt
+}
+
+model Session {
+  id        Int          @id @default(autoincrement())
+  tokenHash String       @unique @db.Char(64)
+  staffId   Int
+  staff     StaffAccount @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime     @default(now())
+
+  @@index([staffId])
+  @@index([expiresAt])
+}
+
+model AuditLog {
+  id         Int           @id @default(autoincrement())
+  staffId    Int?
+  staff      StaffAccount? @relation(fields: [staffId], references: [id], onDelete: Restrict)
+  action     String        @db.VarChar(50)
+  entityType String        @db.VarChar(50)
+  entityId   String?       @db.VarChar(50)
+  details    Json?
+  createdAt  DateTime      @default(now())
+
+  @@index([staffId])
+  @@index([action, createdAt])
+}
+
+model StayExtension {
+  id                         Int           @id @default(autoincrement())
+  stayId                     Int
+  stay                       Stay          @relation(fields: [stayId], references: [id], onDelete: Restrict)
+  createdById                Int
+  createdBy                  StaffAccount  @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  durationHours              Int
+  amountCentavos             Int
+  paymentMethod              PaymentMethod
+  previousExpectedCheckoutAt DateTime
+  extendedExpectedCheckoutAt DateTime
+  createdAt                  DateTime      @default(now())
+
+  @@index([stayId, createdAt])
+  @@index([createdById, createdAt])
+}
+
+model FinancialTransaction {
+  id              Int                      @id @default(autoincrement())
+  stayId          Int?
+  stay            Stay?                    @relation(fields: [stayId], references: [id], onDelete: Restrict)
+  handledById     Int?
+  handledBy       StaffAccount?            @relation(fields: [handledById], references: [id], onDelete: Restrict)
+  transactionType FinancialTransactionType
+  amountCentavos  Int
+  paymentMethod   PaymentMethod
+  note            String?                  @db.VarChar(500)
+  createdAt       DateTime                 @default(now())
+
+  @@index([stayId, createdAt])
+  @@index([handledById, createdAt])
+  @@index([transactionType, createdAt])
+}
+
+model Shift {
+  id        Int       @id @default(autoincrement())
+  type      ShiftType
+  startsAt  DateTime  @unique
+  endsAt    DateTime
+  stays     Stay[]
+  createdAt DateTime  @default(now())
+
+  @@index([type, startsAt])
 }
