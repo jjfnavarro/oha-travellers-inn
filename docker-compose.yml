@@ -1,0 +1,35 @@
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: oha-travellers-inn-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: oha_travellers_inn
+      MYSQL_USER: oha_user
+      MYSQL_PASSWORD: development_password
+      MYSQL_ROOT_PASSWORD: development_root_password
+      TZ: Asia/Manila
+    ports:
+      - '3306:3306'
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./server/prisma/mysql-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'mysqladmin',
+          'ping',
+          '-h',
+          'localhost',
+          '-u',
+          'root',
+          '-pdevelopment_root_password',
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+volumes:
+  mysql_data:
