@@ -2,7 +2,7 @@
 
 ## Scope
 
-This repository currently contains only the Milestone 1 technical foundation. Do not add motel business features until a later milestone explicitly requires them.
+This repository contains the Milestone 1 technical foundation, Milestone 2 room inventory, and Milestone 3 active stays. Do not add reservations, reporting, shifts, authentication, refunds, or overdue charges until a later milestone explicitly requires them.
 
 ## Conventions
 

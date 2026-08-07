@@ -1,8 +1,8 @@
 # OHA Traveller's Inn Management System
 
-This repository contains the Milestone 1 technical foundation for a future front-desk system for OHA Traveller's Inn. It currently proves that the React client can reach the Express API and that the API can reach MySQL through Prisma.
+This repository contains the technical foundation, room inventory, and active-stay workflow for OHA Traveller's Inn. The React client reaches the Express API, which manages room and check-in data in MySQL through Prisma.
 
-Room management, check-ins, stays, reservations, reports, and staff login are not part of this milestone.
+Reservations, reports, shifts, staff login, refunds, and overdue charges are not implemented yet.
 
 ## Prerequisites
 
@@ -64,9 +64,10 @@ Create or apply the development migration:
 
 ```powershell
 npm run prisma:migrate
+npm run prisma:seed
 ```
 
-Milestone 1 does not define motel business tables. Prisma is used to run a small connectivity query for the health endpoint.
+The seed command adds the 28 rooms and room rates provided by the owner. It is safe to run again because it updates the known inventory instead of duplicating it.
 
 Prisma Migrate uses the separate `oha_travellers_inn_shadow` database configured for local development. The Docker initialization script creates it automatically on a new MySQL volume.
 
@@ -108,6 +109,8 @@ Open <http://localhost:5173>. The page should display:
 OHA Traveller's Inn
 System Connected
 ```
+
+The Rooms view displays all 28 configured rooms and their live occupancy. Employees can check guests in, check them out early, and monitor countdowns, five-minute warnings, and overdue stays. Select **Enable sound** once per browser session to permit audible warnings. The Rates view displays and edits offered stay durations.
 
 ## Quality Checks
 

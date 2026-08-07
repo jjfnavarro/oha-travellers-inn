@@ -7,3 +7,80 @@ datasource db {
   url               = env("DATABASE_URL")
   shadowDatabaseUrl = env("SHADOW_DATABASE_URL")
 }
+
+enum RoomOperationalStatus {
+  ACTIVE
+  MAINTENANCE
+  INACTIVE
+}
+
+enum StayStatus {
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+enum ArrivalType {
+  VEHICLE
+  WALK_IN
+}
+
+model RoomType {
+  id          Int        @id @default(autoincrement())
+  name        String     @unique @db.VarChar(50)
+  description String?    @db.VarChar(255)
+  rates       StayRate[]
+  rooms       Room[]
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+}
+
+model StayRate {
+  id              Int      @id @default(autoincrement())
+  roomTypeId      Int
+  durationHours   Int
+  amountCentavos  Int
+  roomType        RoomType @relation(fields: [roomTypeId], references: [id], onDelete: Cascade)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([roomTypeId, durationHours])
+  @@index([roomTypeId])
+}
+
+model Room {
+  id                Int                   @id @default(autoincrement())
+  number            String                @unique @db.VarChar(10)
+  displayOrder      Int                   @unique
+  operationalStatus RoomOperationalStatus @default(ACTIVE)
+  roomTypeId        Int
+  roomType          RoomType              @relation(fields: [roomTypeId], references: [id], onDelete: Restrict)
+  stays             Stay[]
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+
+  @@index([roomTypeId])
+  @@index([operationalStatus])
+}
+
+model Stay {
+  id                 Int         @id @default(autoincrement())
+  roomId             Int
+  activeRoomId       Int?        @unique
+  room               Room        @relation(fields: [roomId], references: [id], onDelete: Restrict)
+  status             StayStatus  @default(ACTIVE)
+  arrivalType        ArrivalType
+  guestName          String?     @db.VarChar(100)
+  plateNumber        String?     @db.VarChar(30)
+  notes              String?     @db.VarChar(500)
+  durationHours      Int
+  paidAmountCentavos Int
+  checkedInAt        DateTime    @default(now())
+  expectedCheckoutAt DateTime
+  checkedOutAt       DateTime?
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+
+  @@index([roomId])
+  @@index([status, expectedCheckoutAt])
+}

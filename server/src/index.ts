@@ -4,7 +4,7 @@ import { loadEnvironment } from './config/env.js';
 import { checkDatabaseConnection, prisma } from './database/prisma.js';
 
 const environment = loadEnvironment();
-const app = createApp(environment, checkDatabaseConnection);
+const app = createApp(environment, checkDatabaseConnection, prisma);
 
 const server = app.listen(environment.PORT, () => {
   console.log(`OHA server listening on http://localhost:${environment.PORT}`);

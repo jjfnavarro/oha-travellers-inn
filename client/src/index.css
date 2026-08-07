@@ -7,69 +7,545 @@
     BlinkMacSystemFont,
     'Segoe UI',
     sans-serif;
-  color: #17211b;
-  background: #f3f5f2;
+  color: #181818;
+  background: #f4f4f4;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
 }
-
 * {
   box-sizing: border-box;
 }
-
 body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
 }
-
-.page-shell {
+button,
+input,
+select {
+  font: inherit;
+}
+button {
+  cursor: pointer;
+}
+.app-shell {
   min-height: 100vh;
-  display: grid;
-  place-items: center;
-  padding: 24px;
-  border-top: 8px solid #d4a72c;
 }
-
-.status-panel {
-  width: min(100%, 640px);
-  text-align: center;
+.app-header {
+  min-height: 104px;
+  padding: 20px clamp(20px, 4vw, 56px);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  background: #ffffff;
+  color: #111111;
+  border-bottom: 5px solid #1b1b1b;
 }
-
+.brand-lockup {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+.brand-logo {
+  width: 112px;
+  height: 72px;
+  object-fit: contain;
+  flex: 0 0 auto;
+}
 .eyebrow {
-  margin: 0 0 12px;
-  color: #526259;
-  font-size: 0.875rem;
+  margin: 0 0 4px;
+  color: #6d6d6d;
+  font-size: 0.75rem;
   font-weight: 700;
-  letter-spacing: 0;
   text-transform: uppercase;
+  letter-spacing: 0;
 }
-
 h1 {
   margin: 0;
-  color: #12372a;
   font-family: Georgia, 'Times New Roman', serif;
-  font-size: clamp(2.25rem, 8vw, 4.5rem);
-  line-height: 1.05;
+  font-size: clamp(1.65rem, 4vw, 2.4rem);
+  line-height: 1.1;
   letter-spacing: 0;
 }
-
-.status {
-  margin: 28px auto 0;
-  max-width: 560px;
-  font-size: 1.125rem;
+.connection {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.875rem;
   font-weight: 650;
-  line-height: 1.5;
+  white-space: nowrap;
 }
-
-.checking {
-  color: #526259;
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 18px;
 }
-
-.connected {
-  color: #177245;
+.sound-button {
+  min-height: 36px;
+  padding: 7px 11px;
+  border: 1px solid #bdbdbd;
+  border-radius: 5px;
+  background: #f5f5f5;
+  color: #292929;
+  font-size: 0.8rem;
+  font-weight: 700;
 }
-
-.error {
-  color: #a12b2b;
+.connection span {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #292929;
+  box-shadow: 0 0 0 3px rgb(41 41 41 / 14%);
+}
+.tabs {
+  min-height: 54px;
+  padding: 0 clamp(20px, 4vw, 56px);
+  display: flex;
+  gap: 28px;
+  background: white;
+  border-bottom: 1px solid #d8d8d8;
+}
+.tabs button {
+  padding: 0 2px;
+  border: 0;
+  border-bottom: 3px solid transparent;
+  background: transparent;
+  color: #666666;
+  font-weight: 650;
+}
+.tabs button.active {
+  color: #111111;
+  border-bottom-color: #111111;
+}
+.content {
+  width: min(1180px, calc(100% - 40px));
+  margin: 0 auto;
+  padding: 32px 0 56px;
+}
+.page-heading {
+  min-height: 58px;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 20px;
+  margin-bottom: 24px;
+}
+.page-heading h2 {
+  margin: 0 0 5px;
+  font-size: 1.55rem;
+  letter-spacing: 0;
+}
+.page-heading p {
+  margin: 0;
+  color: #6c6c6c;
+}
+.primary-button,
+.secondary-button {
+  min-height: 42px;
+  padding: 9px 16px;
+  border-radius: 6px;
+  font-weight: 700;
+  border: 1px solid transparent;
+}
+.primary-button {
+  color: white;
+  background: #1c1c1c;
+}
+.primary-button:hover {
+  background: #000000;
+}
+.secondary-button {
+  color: #292929;
+  background: white;
+  border-color: #bdbdbd;
+}
+button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+.filter-bar {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 18px;
+}
+.filter-bar button {
+  min-height: 36px;
+  padding: 7px 13px;
+  border: 1px solid #cccccc;
+  border-radius: 6px;
+  background: transparent;
+  color: #565656;
+  white-space: nowrap;
+}
+.filter-bar button.active {
+  background: #242424;
+  border-color: #242424;
+  color: white;
+}
+.room-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px;
+}
+.room-card {
+  min-height: 220px;
+  padding: 17px;
+  border: 1px solid #d6d6d6;
+  border-radius: 7px;
+  background: white;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 5%);
+}
+.room-card.due_soon {
+  border: 2px solid #626262;
+}
+.room-card.overdue {
+  border: 3px double #111111;
+  background: #ececec;
+}
+.room-card-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  color: #777777;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.room-card-top strong {
+  color: #111111;
+  font-size: 2rem;
+  line-height: 1;
+}
+.room-card .room-type {
+  margin: 14px 0 10px;
+  color: #525252;
+  font-weight: 650;
+}
+.occupancy-control {
+  display: grid;
+  gap: 8px;
+}
+.occupancy-badge {
+  width: fit-content;
+  padding: 4px 7px;
+  border: 1px solid #bdbdbd;
+  border-radius: 4px;
+  background: #f4f4f4;
+  color: #343434;
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+.occupancy-badge.due_soon {
+  border-color: #555555;
+  background: #dddddd;
+}
+.occupancy-badge.overdue {
+  border-color: #111111;
+  background: #111111;
+  color: white;
+}
+.timer {
+  font-size: 0.9rem;
+  font-variant-numeric: tabular-nums;
+}
+.occupancy-control small {
+  color: #707070;
+  line-height: 1.35;
+}
+.room-action {
+  width: 100%;
+  min-height: 36px;
+  padding: 6px 10px;
+  margin-top: 2px;
+}
+.status-control {
+  display: grid;
+  gap: 5px;
+  margin-top: 12px;
+}
+.status-control > span {
+  color: #777777;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.status-select {
+  width: 100%;
+  height: 36px;
+  padding: 0 9px;
+  border-radius: 5px;
+  border: 1px solid;
+  font-weight: 650;
+}
+.status-select.active {
+  color: #202020;
+  background: #f7f7f7;
+  border-color: #bdbdbd;
+}
+.status-select.maintenance {
+  color: #343434;
+  background: #e5e5e5;
+  border-color: #a8a8a8;
+}
+.status-select.inactive {
+  color: #707070;
+  background: #eeeeee;
+  border-color: #cecece;
+}
+.error-banner {
+  padding: 11px 24px;
+  background: #e2e2e2;
+  color: #1f1f1f;
+  text-align: center;
+}
+.center-state {
+  min-height: 100vh;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 20px;
+  padding: 24px;
+  text-align: center;
+}
+.center-state h1 {
+  color: #111111;
+}
+.error-message,
+.form-error {
+  color: #333333;
+}
+.empty-state {
+  padding: 48px 0;
+  color: #6b6b6b;
+  text-align: center;
+}
+.rate-table-wrap {
+  overflow-x: auto;
+  border-top: 1px solid #cccccc;
+  border-bottom: 1px solid #cccccc;
+  background: white;
+}
+.rate-table {
+  width: 100%;
+  min-width: 850px;
+  border-collapse: collapse;
+}
+.rate-table th,
+.rate-table td {
+  padding: 15px 12px;
+  border-bottom: 1px solid #e2e2e2;
+  text-align: left;
+}
+.rate-table thead th {
+  color: #5e5e5e;
+  background: #eeeeee;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+}
+.rate-table tbody th span {
+  display: block;
+  margin-top: 3px;
+  color: #7a7a7a;
+  font-size: 0.78rem;
+  font-weight: 400;
+}
+.rate-table label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: #696969;
+}
+.rate-table input {
+  width: 110px;
+  height: 38px;
+  padding: 7px 8px;
+  border: 1px solid #cccccc;
+  border-radius: 5px;
+}
+.rate-summary {
+  margin-top: 22px;
+  color: #565656;
+  font-size: 0.9rem;
+}
+.rate-summary p {
+  margin: 8px 0;
+}
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgb(0 0 0 / 58%);
+}
+.dialog {
+  width: min(100%, 440px);
+  padding: 22px;
+  border-radius: 8px;
+  background: white;
+  box-shadow: 0 18px 60px rgb(0 0 0 / 25%);
+}
+.dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
+.dialog h2 {
+  margin: 0;
+  font-size: 1.35rem;
+}
+.dialog-eyebrow {
+  margin: 0 0 3px;
+  color: #6b6b6b;
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+.check-in-dialog {
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+}
+.icon-button {
+  width: 38px;
+  height: 38px;
+  border: 0;
+  background: transparent;
+  color: #565656;
+  font-size: 1.7rem;
+  line-height: 1;
+}
+.dialog form > label {
+  display: grid;
+  gap: 7px;
+  margin: 15px 0;
+  color: #454545;
+  font-weight: 650;
+}
+.dialog input,
+.dialog select {
+  width: 100%;
+  height: 44px;
+  padding: 9px 11px;
+  border: 1px solid #bdbdbd;
+  border-radius: 5px;
+  background: white;
+}
+.dialog textarea {
+  width: 100%;
+  padding: 9px 11px;
+  resize: vertical;
+  border: 1px solid #bdbdbd;
+  border-radius: 5px;
+}
+.optional {
+  color: #777777;
+  font-size: 0.75rem;
+  font-weight: 400;
+}
+.segmented-field {
+  padding: 0;
+  margin: 15px 0;
+  border: 0;
+}
+.segmented-field legend {
+  margin-bottom: 7px;
+  color: #454545;
+  font-weight: 650;
+}
+.segmented-field > div {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+.segmented-field button {
+  min-height: 42px;
+  border: 1px solid #bdbdbd;
+  background: white;
+  color: #555555;
+  font-weight: 700;
+}
+.segmented-field button:first-child {
+  border-radius: 5px 0 0 5px;
+}
+.segmented-field button:last-child {
+  margin-left: -1px;
+  border-radius: 0 5px 5px 0;
+}
+.segmented-field button.active {
+  z-index: 1;
+  border-color: #171717;
+  background: #171717;
+  color: white;
+}
+.payment-summary {
+  display: grid;
+  gap: 3px;
+  padding: 14px;
+  margin-top: 18px;
+  border-left: 4px solid #1b1b1b;
+  background: #eeeeee;
+}
+.payment-summary span,
+.payment-summary small {
+  color: #686868;
+}
+.payment-summary strong {
+  font-size: 1.25rem;
+}
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 9px;
+  margin-top: 24px;
+}
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+@media (max-width: 620px) {
+  .app-header {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .header-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+  .brand-logo {
+    width: 92px;
+    height: 60px;
+  }
+  .content {
+    width: min(100% - 28px, 1180px);
+    padding-top: 24px;
+  }
+  .page-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .primary-button {
+    width: 100%;
+  }
+  .room-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .room-card {
+    min-height: 270px;
+    padding: 14px;
+  }
+  .room-card-top strong {
+    font-size: 1.65rem;
+  }
 }
