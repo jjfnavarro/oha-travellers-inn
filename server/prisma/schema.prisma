@@ -10,6 +10,7 @@ datasource db {
 
 enum RoomOperationalStatus {
   ACTIVE
+  CLEANING
   MAINTENANCE
   INACTIVE
 }
@@ -23,6 +24,14 @@ enum StayStatus {
 enum ArrivalType {
   VEHICLE
   WALK_IN
+}
+
+enum VehicleType {
+  MOTORCYCLE
+  CAR
+  VAN
+  TRICYCLE
+  OTHER_VEHICLE
 }
 
 enum ShiftType {
@@ -44,6 +53,15 @@ enum PaymentMethod {
 enum FinancialTransactionType {
   ROOM_CHARGE
   EXTENSION_CHARGE
+}
+
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  ARRIVED
+  COMPLETED
+  CANCELLED
+  NO_SHOW
 }
 
 model RoomType {
@@ -77,6 +95,7 @@ model Room {
   roomTypeId        Int
   roomType          RoomType              @relation(fields: [roomTypeId], references: [id], onDelete: Restrict)
   stays             Stay[]
+  bookings          Booking[]
   createdAt         DateTime              @default(now())
   updatedAt         DateTime              @updatedAt
 
@@ -97,6 +116,7 @@ model Stay {
   checkedOutBy          StaffAccount?          @relation("CheckedOutBy", fields: [checkedOutById], references: [id], onDelete: Restrict)
   status                StayStatus             @default(ACTIVE)
   arrivalType           ArrivalType
+  vehicleType           VehicleType?
   guestName             String?                @db.VarChar(100)
   plateNumber           String?                @db.VarChar(30)
   notes                 String?                @db.VarChar(500)
@@ -107,6 +127,7 @@ model Stay {
   checkedOutAt          DateTime?
   extensions            StayExtension[]
   financialTransactions FinancialTransaction[]
+  booking               Booking?
   createdAt             DateTime               @default(now())
   updatedAt             DateTime               @updatedAt
 
@@ -129,6 +150,8 @@ model StaffAccount {
   checkedOutStays     Stay[]                 @relation("CheckedOutBy")
   stayExtensions      StayExtension[]
   handledTransactions FinancialTransaction[]
+  createdBookings     Booking[]             @relation("BookingCreatedBy")
+  updatedBookings     Booking[]             @relation("BookingUpdatedBy")
   createdAt           DateTime               @default(now())
   updatedAt           DateTime               @updatedAt
 }
@@ -202,4 +225,34 @@ model Shift {
   createdAt DateTime  @default(now())
 
   @@index([type, startsAt])
+}
+
+model Booking {
+  id                    Int            @id @default(autoincrement())
+  bookingDate           DateTime       @db.Date
+  estimatedArrivalAt    DateTime?
+  roomId                Int?
+  room                  Room?          @relation(fields: [roomId], references: [id], onDelete: Restrict)
+  expectedDurationHours Int
+  guestName             String?        @db.VarChar(100)
+  contactNumber         String?        @db.VarChar(30)
+  arrivalType           ArrivalType?
+  vehicleType           VehicleType?
+  plateNumber           String?        @db.VarChar(30)
+  bookingReference      String?        @unique @db.VarChar(50)
+  notes                 String?        @db.VarChar(500)
+  status                BookingStatus  @default(PENDING)
+  convertedStayId       Int?           @unique
+  convertedStay         Stay?          @relation(fields: [convertedStayId], references: [id], onDelete: Restrict)
+  createdByUserId       Int
+  createdBy             StaffAccount   @relation("BookingCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  updatedByUserId       Int?
+  updatedBy             StaffAccount?  @relation("BookingUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: Restrict)
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
+
+  @@index([bookingDate, status])
+  @@index([roomId, estimatedArrivalAt])
+  @@index([createdByUserId, createdAt])
+  @@index([updatedByUserId])
 }

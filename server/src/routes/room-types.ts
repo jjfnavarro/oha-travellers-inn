@@ -82,10 +82,15 @@ export function createRoomTypesRouter(prisma: PrismaClient): Router {
 
     try {
       const roomType = await prisma.$transaction(async (transaction) => {
+        const previous = await transaction.roomType.findUnique({
+          where: { id: id.data },
+          include: { rates: { orderBy: { durationHours: 'asc' } } },
+        });
+        if (!previous) throw new RateRuleError('Room type not found.', 404);
         await transaction.stayRate.deleteMany({
           where: { roomTypeId: id.data },
         });
-        return transaction.roomType.update({
+        const updated = await transaction.roomType.update({
           where: { id: id.data },
           data: {
             name: body.data.name,
@@ -94,17 +99,40 @@ export function createRoomTypesRouter(prisma: PrismaClient): Router {
           },
           include: { rates: { orderBy: { durationHours: 'asc' } } },
         });
+        await transaction.auditLog.create({
+          data: {
+            staffId: request.authUser?.id,
+            action: 'RATE_UPDATE',
+            entityType: 'ROOM_TYPE',
+            entityId: String(id.data),
+            details: {
+              previousValue: {
+                name: previous.name,
+                description: previous.description,
+                rates: previous.rates.map((rate) => ({
+                  durationHours: rate.durationHours,
+                  amountCentavos: rate.amountCentavos,
+                })),
+              },
+              newValue: {
+                name: updated.name,
+                description: updated.description,
+                rates: updated.rates.map((rate) => ({
+                  durationHours: rate.durationHours,
+                  amountCentavos: rate.amountCentavos,
+                })),
+              },
+            },
+          },
+        });
+        return updated;
       });
       response.json({ data: roomType });
-      await prisma.auditLog.create({
-        data: {
-          staffId: request.authUser?.id,
-          action: 'RATE_UPDATE',
-          entityType: 'ROOM_TYPE',
-          entityId: String(id.data),
-        },
-      });
     } catch (error: unknown) {
+      if (error instanceof RateRuleError) {
+        response.status(error.statusCode).json({ message: error.message });
+        return;
+      }
       if (
         error instanceof Prisma.PrismaClientKnownRequestError &&
         error.code === 'P2025'
@@ -126,4 +154,13 @@ export function createRoomTypesRouter(prisma: PrismaClient): Router {
   });
 
   return router;
+}
+
+class RateRuleError extends Error {
+  constructor(
+    message: string,
+    readonly statusCode: number,
+  ) {
+    super(message);
+  }
 }

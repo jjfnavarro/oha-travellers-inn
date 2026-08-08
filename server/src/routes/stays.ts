@@ -5,6 +5,7 @@ import {
   Prisma,
   RoomOperationalStatus,
   StayStatus,
+  VehicleType,
   type PrismaClient,
 } from '@prisma/client';
 import { Router } from 'express';
@@ -16,6 +17,7 @@ const checkInSchema = z.object({
   roomId: z.number().int().positive(),
   durationHours: z.number().int().positive().max(24),
   arrivalType: z.nativeEnum(ArrivalType),
+  vehicleType: z.nativeEnum(VehicleType).optional().nullable(),
   guestName: z.string().trim().max(100).optional().nullable(),
   plateNumber: z.string().trim().max(30).optional().nullable(),
   notes: z.string().trim().max(500).optional().nullable(),
@@ -164,6 +166,10 @@ export function createStaysRouter(prisma: PrismaClient): Router {
               activeRoomId: room.id,
               status: StayStatus.ACTIVE,
               arrivalType: result.data.arrivalType,
+              vehicleType:
+                result.data.arrivalType === ArrivalType.VEHICLE
+                  ? (result.data.vehicleType ?? null)
+                  : null,
               guestName: optionalText(result.data.guestName),
               plateNumber:
                 optionalText(result.data.plateNumber)?.toUpperCase() ?? null,
@@ -324,39 +330,75 @@ export function createStaysRouter(prisma: PrismaClient): Router {
     }
 
     const checkedOutAt = new Date();
-    const update = await prisma.stay.updateMany({
-      where: { id: id.data, status: StayStatus.ACTIVE },
-      data: {
-        status: StayStatus.COMPLETED,
-        checkedOutAt,
-        activeRoomId: null,
-        checkedOutById: request.authUser?.id,
-      },
-    });
-    if (update.count === 0) {
-      response.status(409).json({
-        message: 'This stay is not active or has already checked out.',
+    let stay: Awaited<ReturnType<typeof prisma.stay.findUnique>>;
+    try {
+      stay = await prisma.$transaction(async (transaction) => {
+        const activeStay = await transaction.stay.findFirst({
+          where: { id: id.data, status: StayStatus.ACTIVE },
+        });
+        if (!activeStay) {
+          throw new StayRuleError(
+            'This stay is not active or has already checked out.',
+            409,
+          );
+        }
+        const updatedStay = await transaction.stay.update({
+          where: { id: activeStay.id },
+          data: {
+            status: StayStatus.COMPLETED,
+            checkedOutAt,
+            activeRoomId: null,
+            checkedOutById: request.authUser.id,
+          },
+          include: stayInclude,
+        });
+        await transaction.room.update({
+          where: { id: activeStay.roomId },
+          data: { operationalStatus: RoomOperationalStatus.CLEANING },
+        });
+        await transaction.booking.updateMany({
+          where: {
+            convertedStayId: activeStay.id,
+            status: 'ARRIVED',
+          },
+          data: {
+            status: 'COMPLETED',
+            updatedByUserId: request.authUser.id,
+          },
+        });
+        await transaction.auditLog.create({
+          data: {
+            staffId: request.authUser.id,
+            action: 'CHECK_OUT',
+            entityType: 'STAY',
+            entityId: String(activeStay.id),
+            details: {
+              early: checkedOutAt < activeStay.expectedCheckoutAt,
+            },
+          },
+        });
+        await transaction.auditLog.create({
+          data: {
+            staffId: request.authUser.id,
+            action: 'MARK_ROOM_CLEANING',
+            entityType: 'ROOM',
+            entityId: String(activeStay.roomId),
+            details: {
+              previousValue: RoomOperationalStatus.ACTIVE,
+              newValue: RoomOperationalStatus.CLEANING,
+              stayId: activeStay.id,
+            },
+          },
+        });
+        return updatedStay;
       });
-      return;
+    } catch (error: unknown) {
+      if (error instanceof StayRuleError) {
+        response.status(error.statusCode).json({ message: error.message });
+        return;
+      }
+      throw error;
     }
-
-    const stay = await prisma.stay.findUnique({
-      where: { id: id.data },
-      include: stayInclude,
-    });
-    await prisma.auditLog.create({
-      data: {
-        staffId: request.authUser?.id,
-        action: 'CHECK_OUT',
-        entityType: 'STAY',
-        entityId: String(id.data),
-        details: {
-          early: Boolean(
-            stay?.checkedOutAt && stay.checkedOutAt < stay.expectedCheckoutAt,
-          ),
-        },
-      },
-    });
     response.json({ data: stay });
   });
 

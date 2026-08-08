@@ -13,7 +13,7 @@ Milestone 3 adds operational occupancy to the room board.
 - Unsupported room-type durations cannot be selected or submitted.
 - A warning appears and sounds when five minutes remain.
 - Overdue warnings remain visible and sound every 60 seconds until checkout.
-- The employee must enable sound once per browser session because iPad browsers block audio before user interaction.
+- The employee must enable sound once per browser session because Android Chrome and other browsers restrict audio before user interaction.
 
 ## Deferred
 

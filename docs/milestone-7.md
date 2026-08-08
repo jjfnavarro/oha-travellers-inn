@@ -1,6 +1,19 @@
 # Milestone 7: Owner Overall and Per-Staff Reporting
 
-Milestone 7 will provide Owner-only operational and financial reporting calculated by backend services from saved database records.
+Milestone 7 provides Owner-only operational and financial reporting calculated by backend services from saved database records.
+
+## Implemented Scope
+
+- Overall motel and individual active-staff reporting modes
+- Current shift, previous shift, today, specific date, week, month, and custom-range periods
+- Day, Night, and All shifts
+- Check-in, checkout, room-use, unique-room, package, extension, arrival, and overdue statistics
+- Room-charge, extension, gross, net, collected, and Cash/GCash totals from `FinancialTransaction`
+- Room usage, package, payment-method, and detailed activity breakdowns
+- Matching screen, PDF, and Excel calculations
+- Backend Owner authorization
+- Responsive Android tablet, desktop, and mobile layouts
+- Tests for period boundaries, overall calculations, per-staff attribution, and authorization
 
 ## Reporting Modes
 
@@ -70,7 +83,7 @@ The staff report will include a chronological activity log. Entries should show,
 
 ## Owner Interface
 
-The iPad and desktop interface will provide a reporting-period control, shift filter, Overall/By Staff segmented control, and staff selector when By Staff is active. It will present concise summary metrics followed by package, room, vehicle, and financial breakdowns and the detailed activity log.
+The Android tablet and desktop interface provides a reporting-period control, shift filter, Overall/By Staff segmented control, and staff selector when By Staff is active. It presents concise summary metrics followed by package, room, vehicle, and financial breakdowns and the detailed activity log.
 
 The backend must enforce Owner access for report data and exports. React visibility rules are supplemental only.
 
@@ -89,4 +102,4 @@ Tests will cover:
 
 ## Scope Boundary
 
-Reports will not use manually maintained counters or derive historical revenue solely from stay duration and current pricing. Expenses and other income remain outside scope unless a later requirement explicitly adds them.
+Reports do not use manually maintained counters or derive historical revenue solely from stay duration and current pricing. Bookings, `ADMIN`, vehicle subtypes, discounts, adjustments, refunds, expenses, and other income are not part of the current implementation. Until money-reducing transaction types are introduced, gross revenue, net revenue, and total collected are equal.

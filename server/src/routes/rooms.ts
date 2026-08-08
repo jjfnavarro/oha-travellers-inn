@@ -117,6 +117,14 @@ export function createRoomsRouter(prisma: PrismaClient): Router {
       return;
     }
     try {
+      const existingRoom = await prisma.room.findUnique({
+        where: { id: id.data },
+        select: { operationalStatus: true },
+      });
+      if (!existingRoom) {
+        response.status(404).json({ message: 'Room not found.' });
+        return;
+      }
       if (body.data.operationalStatus !== undefined) {
         const activeStay = await prisma.stay.findUnique({
           where: { activeRoomId: id.data },
@@ -141,19 +149,32 @@ export function createRoomsRouter(prisma: PrismaClient): Router {
           ? { operationalStatus: body.data.operationalStatus }
           : {}),
       };
-      const room = await prisma.room.update({
-        where: { id: id.data },
-        data,
-        include: roomInclude,
-      });
-      await prisma.auditLog.create({
-        data: {
-          staffId: request.authUser?.id,
-          action: 'ROOM_STATUS_UPDATE',
-          entityType: 'ROOM',
-          entityId: String(room.id),
-          details: { operationalStatus: room.operationalStatus },
-        },
+      const room = await prisma.$transaction(async (transaction) => {
+        const updatedRoom = await transaction.room.update({
+          where: { id: id.data },
+          data,
+          include: roomInclude,
+        });
+        const action =
+          existingRoom.operationalStatus === RoomOperationalStatus.CLEANING &&
+          updatedRoom.operationalStatus === RoomOperationalStatus.ACTIVE
+            ? 'MARK_ROOM_AVAILABLE'
+            : updatedRoom.operationalStatus === RoomOperationalStatus.CLEANING
+              ? 'MARK_ROOM_CLEANING'
+              : 'ROOM_STATUS_UPDATE';
+        await transaction.auditLog.create({
+          data: {
+            staffId: request.authUser?.id,
+            action,
+            entityType: 'ROOM',
+            entityId: String(updatedRoom.id),
+            details: {
+              previousValue: existingRoom.operationalStatus,
+              newValue: updatedRoom.operationalStatus,
+            },
+          },
+        });
+        return updatedRoom;
       });
       response.json({ data: room });
     } catch (error: unknown) {

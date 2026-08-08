@@ -2,6 +2,7 @@ import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import {
   BadgeDollarSign,
   BedDouble,
+  CalendarDays,
   ChartNoAxesCombined,
   ClipboardList,
   Clock3,
@@ -12,10 +13,20 @@ import {
   Users,
 } from 'lucide-react';
 import { getOccupancyStatus, type OccupancyStatus } from './stay-status';
+import { apiRequest, apiUrl } from './api';
+import { BookingsView } from './BookingsView';
 
-type OperationalStatus = 'ACTIVE' | 'MAINTENANCE' | 'INACTIVE';
+type OperationalStatus = 'ACTIVE' | 'CLEANING' | 'MAINTENANCE' | 'INACTIVE';
+type VehicleType = 'MOTORCYCLE' | 'CAR' | 'VAN' | 'TRICYCLE' | 'OTHER_VEHICLE';
 type View =
-  'rooms' | 'history' | 'reports' | 'shifts' | 'rates' | 'staff' | 'audit';
+  | 'rooms'
+  | 'bookings'
+  | 'history'
+  | 'reports'
+  | 'shifts'
+  | 'rates'
+  | 'staff'
+  | 'audit';
 type StaffRole = 'OWNER' | 'FRONT_DESK';
 
 interface StaffUser {
@@ -23,7 +34,8 @@ interface StaffUser {
   username: string;
   role: StaffRole;
 }
-type RoomFilter = 'ALL' | OccupancyStatus | 'MAINTENANCE' | 'INACTIVE';
+type RoomFilter =
+  'ALL' | OccupancyStatus | 'CLEANING' | 'MAINTENANCE' | 'INACTIVE';
 
 interface Rate {
   id: number;
@@ -53,6 +65,7 @@ interface Stay {
   id: number;
   roomId: number;
   arrivalType: 'VEHICLE' | 'WALK_IN';
+  vehicleType: VehicleType | null;
   guestName: string | null;
   plateNumber: string | null;
   durationHours: number;
@@ -83,29 +96,7 @@ interface ApiCollection<T> {
   data: T[];
 }
 
-const apiUrl = import.meta.env.VITE_API_URL ?? 'http://localhost:4000/api';
 const durations = [3, 6, 12, 24] as const;
-
-async function apiRequest<T>(path: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(`${apiUrl}${path}`, {
-    ...options,
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
-  });
-  const body: unknown =
-    response.status === 204 ? undefined : await response.json();
-  if (!response.ok) {
-    const message =
-      typeof body === 'object' && body !== null && 'message' in body
-        ? String(body.message)
-        : 'The request could not be completed.';
-    if (response.status === 401 && path !== '/auth/login') {
-      window.dispatchEvent(new Event('oha:unauthorized'));
-    }
-    throw new Error(message);
-  }
-  return body as T;
-}
 
 function formatMoney(centavos: number): string {
   return new Intl.NumberFormat('en-PH', {
@@ -154,6 +145,7 @@ export default function App() {
   const [extendRoom, setExtendRoom] = useState<Room | null>(null);
   const [now, setNow] = useState(Date.now());
   const [soundEnabled, setSoundEnabled] = useState(false);
+  const [isOnline, setIsOnline] = useState(() => navigator.onLine);
   const warnedStayIds = useRef(new Set<number>());
   const lastOverdueAlert = useRef(new Map<number, number>());
 
@@ -190,6 +182,32 @@ export default function App() {
 
   useEffect(() => {
     if (user) void loadInventory();
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+    const refresh = () => {
+      setIsOnline(true);
+      setNow(Date.now());
+      void loadInventory();
+      window.dispatchEvent(new Event('oha:reconnected'));
+    };
+    const offline = () => setIsOnline(false);
+    const visible = () => {
+      if (document.visibilityState === 'visible' && navigator.onLine) refresh();
+    };
+    const poll = window.setInterval(() => {
+      if (navigator.onLine) void loadInventory();
+    }, 30_000);
+    window.addEventListener('online', refresh);
+    window.addEventListener('offline', offline);
+    document.addEventListener('visibilitychange', visible);
+    return () => {
+      window.clearInterval(poll);
+      window.removeEventListener('online', refresh);
+      window.removeEventListener('offline', offline);
+      document.removeEventListener('visibilitychange', visible);
+    };
   }, [user]);
 
   useEffect(() => {
@@ -242,7 +260,11 @@ export default function App() {
     () =>
       rooms.filter((room) => {
         if (filter === 'ALL') return true;
-        if (filter === 'MAINTENANCE' || filter === 'INACTIVE')
+        if (
+          filter === 'CLEANING' ||
+          filter === 'MAINTENANCE' ||
+          filter === 'INACTIVE'
+        )
           return room.operationalStatus === filter;
         return (
           room.operationalStatus === 'ACTIVE' &&
@@ -361,9 +383,9 @@ export default function App() {
           >
             {soundEnabled ? 'Sound on' : 'Enable sound'}
           </button>
-          <div className="connection">
+          <div className={`connection ${isOnline ? '' : 'offline'}`}>
             <span aria-hidden="true" />
-            System Connected
+            {isOnline ? 'System Connected' : 'System Offline'}
           </div>
           <div className="user-menu">
             <strong>{user.username}</strong>
@@ -410,6 +432,14 @@ export default function App() {
         >
           <History size={20} />
           <span>Stay history</span>
+        </button>
+        <button
+          className={view === 'bookings' ? 'active' : ''}
+          onClick={() => selectView('bookings')}
+          title="Bookings"
+        >
+          <CalendarDays size={20} />
+          <span>Bookings</span>
         </button>
         {user.role === 'OWNER' && (
           <button
@@ -502,6 +532,7 @@ export default function App() {
                   'OCCUPIED',
                   'DUE_SOON',
                   'OVERDUE',
+                  'CLEANING',
                   'MAINTENANCE',
                   'INACTIVE',
                 ] as const
@@ -513,7 +544,9 @@ export default function App() {
                 >
                   {status === 'ALL'
                     ? 'All'
-                    : status === 'MAINTENANCE' || status === 'INACTIVE'
+                    : status === 'CLEANING' ||
+                        status === 'MAINTENANCE' ||
+                        status === 'INACTIVE'
                       ? statusLabel(status)
                       : occupancyLabel(status)}
                 </button>
@@ -607,6 +640,7 @@ export default function App() {
                           }
                         >
                           <option value="ACTIVE">Available</option>
+                          <option value="CLEANING">Cleaning</option>
                           <option value="MAINTENANCE">Maintenance</option>
                           <option value="INACTIVE">Out of service</option>
                         </select>
@@ -625,6 +659,8 @@ export default function App() {
           />
         ) : view === 'history' ? (
           <HistoryView rooms={rooms} roomTypes={roomTypes} />
+        ) : view === 'bookings' ? (
+          <BookingsView rooms={rooms} onStayCreated={loadInventory} />
         ) : view === 'reports' ? (
           <ReportsView />
         ) : view === 'shifts' ? (
@@ -1239,7 +1275,11 @@ function HistoryView({
                   </td>
                   <td>
                     {stay.arrivalType === 'WALK_IN' ? 'Walk-in' : 'Vehicle'}
-                    <small>{stay.plateNumber ?? stay.guestName ?? ''}</small>
+                    <small>
+                      {stay.vehicleType
+                        ? stay.vehicleType.replaceAll('_', ' ')
+                        : (stay.plateNumber ?? stay.guestName ?? '')}
+                    </small>
                   </td>
                   <td>{formatMoney(stay.paidAmountCentavos)}</td>
                   <td>
@@ -1261,19 +1301,74 @@ function HistoryView({
   );
 }
 
-interface DailyReportResponse {
-  date: string;
-  summary: {
-    totalStays: number;
-    totalAmountCentavos: number;
-    activeStays: number;
-    vehicleStays: number;
-    walkInStays: number;
-    earlyCheckouts: number;
-    overdueCheckouts: number;
+type OwnerReportPreset =
+  | 'current_shift'
+  | 'previous_shift'
+  | 'today'
+  | 'specific_date'
+  | 'week'
+  | 'month'
+  | 'custom';
+type OwnerReportShift = 'ALL' | 'DAY' | 'NIGHT';
+
+interface OwnerReportResponse {
+  generatedAt: string;
+  viewMode: 'OVERALL' | 'BY_STAFF';
+  selectedStaff: StaffUser | null;
+  filters: {
+    preset: OwnerReportPreset;
+    shift: OwnerReportShift;
+    startsAt: string;
+    endsAt: string;
+    label: string;
   };
-  byRoomType: { roomType: string; stays: number; amountCentavos: number }[];
-  stays: HistoryStay[];
+  summary: {
+    totalCheckIns: number;
+    completedStays: number;
+    activeStays: number;
+    totalRoomUses: number;
+    uniqueRoomsUsed: number;
+    walkInCount: number;
+    vehicleCount: number;
+    extensionCount: number;
+    overdueCheckoutCount: number;
+  };
+  financial: {
+    grossRoomRevenueCentavos: number;
+    extensionRevenueCentavos: number;
+    grossRevenueCentavos: number;
+    netRevenueCentavos: number;
+    totalCollectedCentavos: number;
+  };
+  packages: {
+    durationHours: number;
+    count: number;
+    revenueCentavos: number;
+  }[];
+  roomUsage: {
+    roomId: number;
+    roomNumber: string;
+    roomType: string;
+    uses: number;
+  }[];
+  paymentMethods: {
+    method: 'CASH' | 'GCASH' | 'UNKNOWN';
+    count: number;
+    amountCentavos: number;
+  }[];
+  vehicleTypes: { type: VehicleType; count: number }[];
+  activity: {
+    id: number;
+    createdAt: string;
+    staff: { id: number; username: string } | null;
+    action: string;
+    roomNumber: string | null;
+    stayId: number | null;
+    bookingId: number | null;
+    amountCentavos: number | null;
+    previousValue: unknown;
+    newValue: unknown;
+  }[];
 }
 
 function manilaOperationalDate(): string {
@@ -1301,17 +1396,52 @@ function manilaOperationalDate(): string {
 
 function ReportsView() {
   const [date, setDate] = useState(manilaOperationalDate);
-  const [period, setPeriod] = useState<'day' | 'week' | 'month'>('day');
-  const [report, setReport] = useState<DailyReportResponse | null>(null);
-  const [statistics, setStatistics] = useState<{
-    totalStays: number;
-    totalAmountCentavos: number;
-    vehicleStays: number;
-    walkInStays: number;
-  } | null>(null);
+  const [from, setFrom] = useState(manilaOperationalDate);
+  const [to, setTo] = useState(manilaOperationalDate);
+  const [preset, setPreset] = useState<OwnerReportPreset>('today');
+  const [shift, setShift] = useState<OwnerReportShift>('ALL');
+  const [viewMode, setViewMode] = useState<'OVERALL' | 'BY_STAFF'>('OVERALL');
+  const [staffId, setStaffId] = useState('');
+  const [staff, setStaff] = useState<StaffRecord[]>([]);
+  const [report, setReport] = useState<OwnerReportResponse | null>(null);
+  const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<string | null>(null);
+
   useEffect(() => {
-    apiRequest<{ data: DailyReportResponse }>(`/reports/daily?date=${date}`)
+    apiRequest<ApiCollection<StaffRecord>>('/staff')
+      .then((response) => {
+        const activeStaff = response.data.filter((account) => account.isActive);
+        setStaff(activeStaff);
+        setStaffId((current) => current || String(activeStaff[0]?.id ?? ''));
+      })
+      .catch((error: unknown) =>
+        setMessage(
+          error instanceof Error
+            ? error.message
+            : 'Staff accounts could not be loaded.',
+        ),
+      );
+  }, []);
+
+  const query = useMemo(() => {
+    const parameters = new URLSearchParams({ preset, shift });
+    if (['specific_date', 'week', 'month'].includes(preset)) {
+      parameters.set('date', date);
+    }
+    if (preset === 'custom') {
+      parameters.set('from', from);
+      parameters.set('to', to);
+    }
+    if (viewMode === 'BY_STAFF' && staffId) {
+      parameters.set('staffId', staffId);
+    }
+    return parameters.toString();
+  }, [date, from, preset, shift, staffId, to, viewMode]);
+
+  useEffect(() => {
+    if (viewMode === 'BY_STAFF' && !staffId) return;
+    setLoading(true);
+    apiRequest<{ data: OwnerReportResponse }>(`/reports/owner?${query}`)
       .then((response) => {
         setReport(response.data);
         setMessage(null);
@@ -1322,30 +1452,26 @@ function ReportsView() {
             ? error.message
             : 'Report could not be loaded.',
         ),
-      );
-  }, [date]);
-  useEffect(() => {
-    apiRequest<{ data: NonNullable<typeof statistics> }>(
-      `/reports/statistics?date=${date}&period=${period}`,
-    )
-      .then((response) => setStatistics(response.data))
-      .catch((error: unknown) =>
-        setMessage(
-          error instanceof Error
-            ? error.message
-            : 'Statistics could not be loaded.',
-        ),
-      );
-  }, [date, period]);
+      )
+      .finally(() => setLoading(false));
+  }, [query, staffId, viewMode]);
+
   const download = (extension: 'pdf' | 'xlsx') => {
-    window.location.href = `${apiUrl}/reports/daily.${extension}?date=${date}`;
+    window.location.href = `${apiUrl}/reports/owner.${extension}?${query}`;
   };
+
   return (
     <section className="print-report">
       <div className="page-heading">
         <div>
-          <h2>Operational day report</h2>
-          <p>8:00 AM through 7:59 AM the following day</p>
+          <h2>Owner reports</h2>
+          <p>
+            {report
+              ? `${report.filters.label} · ${
+                  report.selectedStaff?.username ?? 'Overall motel'
+                }`
+              : 'Operational and financial performance'}
+          </p>
         </div>
         <div className="export-actions">
           <button className="secondary-button" onClick={() => window.print()}>
@@ -1359,77 +1485,339 @@ function ReportsView() {
           </button>
         </div>
       </div>
-      <div className="report-controls">
+      <div className="report-controls owner-report-controls">
         <label>
-          Operational date
-          <input
-            type="date"
-            value={date}
-            onChange={(event) => setDate(event.target.value)}
-          />
+          Reporting period
+          <select
+            value={preset}
+            onChange={(event) =>
+              setPreset(event.target.value as OwnerReportPreset)
+            }
+          >
+            <option value="current_shift">Current shift</option>
+            <option value="previous_shift">Previous shift</option>
+            <option value="today">Today</option>
+            <option value="specific_date">Specific date</option>
+            <option value="week">This week</option>
+            <option value="month">This month</option>
+            <option value="custom">Custom date range</option>
+          </select>
         </label>
-        <fieldset className="period-control">
-          <legend>Statistics period</legend>
+        {['specific_date', 'week', 'month'].includes(preset) && (
+          <label>
+            Reference date
+            <input
+              type="date"
+              value={date}
+              onChange={(event) => setDate(event.target.value)}
+            />
+          </label>
+        )}
+        {preset === 'custom' && (
+          <>
+            <label>
+              From
+              <input
+                type="date"
+                value={from}
+                onChange={(event) => setFrom(event.target.value)}
+              />
+            </label>
+            <label>
+              To
+              <input
+                type="date"
+                value={to}
+                min={from}
+                onChange={(event) => setTo(event.target.value)}
+              />
+            </label>
+          </>
+        )}
+        <label>
+          Shift
+          <select
+            value={shift}
+            onChange={(event) =>
+              setShift(event.target.value as OwnerReportShift)
+            }
+          >
+            <option value="ALL">All shifts</option>
+            <option value="DAY">Day shift</option>
+            <option value="NIGHT">Night shift</option>
+          </select>
+        </label>
+        <fieldset className="period-control report-view-control">
+          <legend>View</legend>
           <div>
-            {(['day', 'week', 'month'] as const).map((value) => (
-              <button
-                type="button"
-                key={value}
-                className={period === value ? 'active' : ''}
-                onClick={() => setPeriod(value)}
-              >
-                {value.charAt(0).toUpperCase() + value.slice(1)}
-              </button>
-            ))}
+            <button
+              type="button"
+              className={viewMode === 'OVERALL' ? 'active' : ''}
+              onClick={() => setViewMode('OVERALL')}
+            >
+              Overall
+            </button>
+            <button
+              type="button"
+              className={viewMode === 'BY_STAFF' ? 'active' : ''}
+              onClick={() => setViewMode('BY_STAFF')}
+            >
+              By staff
+            </button>
           </div>
         </fieldset>
+        {viewMode === 'BY_STAFF' && (
+          <label>
+            Staff account
+            <select
+              value={staffId}
+              onChange={(event) => setStaffId(event.target.value)}
+            >
+              {staff.map((account) => (
+                <option key={account.id} value={account.id}>
+                  {account.username} ·{' '}
+                  {account.role === 'OWNER' ? 'Owner' : 'Front desk'}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
       </div>
       {message && <p className="form-error">{message}</p>}
-      {!report || !statistics ? (
+      {loading || !report ? (
         <p className="empty-state">Loading report...</p>
       ) : (
         <>
-          <div className="metric-grid">
+          <div className="metric-grid owner-metric-grid">
             <div>
-              <span>Total payments</span>
-              <strong>{formatMoney(statistics.totalAmountCentavos)}</strong>
-            </div>
-            <div>
-              <span>Total stays</span>
-              <strong>{statistics.totalStays}</strong>
-            </div>
-            <div>
-              <span>Vehicle / Walk-in</span>
+              <span>Gross revenue</span>
               <strong>
-                {statistics.vehicleStays} / {statistics.walkInStays}
+                {formatMoney(report.financial.grossRevenueCentavos)}
               </strong>
             </div>
             <div>
-              <span>Selected period</span>
+              <span>Net revenue</span>
               <strong>
-                {period.charAt(0).toUpperCase() + period.slice(1)}
+                {formatMoney(report.financial.netRevenueCentavos)}
               </strong>
+            </div>
+            <div>
+              <span>Check-ins</span>
+              <strong>{report.summary.totalCheckIns}</strong>
+            </div>
+            <div>
+              <span>Completed stays</span>
+              <strong>{report.summary.completedStays}</strong>
+            </div>
+            <div>
+              <span>Room uses</span>
+              <strong>{report.summary.totalRoomUses}</strong>
+            </div>
+            <div>
+              <span>Extensions</span>
+              <strong>{report.summary.extensionCount}</strong>
+            </div>
+            <div>
+              <span>Active stays created</span>
+              <strong>{report.summary.activeStays}</strong>
+            </div>
+            <div>
+              <span>Overdue checkouts</span>
+              <strong>{report.summary.overdueCheckoutCount}</strong>
             </div>
           </div>
-          <h3>Selected operational day room type usage</h3>
-          {report.byRoomType.length === 0 ? (
-            <p className="empty-state">No stays for this operational day.</p>
+
+          <div className="report-breakdown-grid">
+            <section>
+              <h3>Financial breakdown</h3>
+              <div className="data-table-wrap">
+                <table className="data-table compact-report-table">
+                  <tbody>
+                    <tr>
+                      <th>Room charges</th>
+                      <td>
+                        {formatMoney(report.financial.grossRoomRevenueCentavos)}
+                      </td>
+                    </tr>
+                    <tr>
+                      <th>Extension charges</th>
+                      <td>
+                        {formatMoney(report.financial.extensionRevenueCentavos)}
+                      </td>
+                    </tr>
+                    <tr>
+                      <th>Total collected</th>
+                      <td>
+                        <strong>
+                          {formatMoney(report.financial.totalCollectedCentavos)}
+                        </strong>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+            <section>
+              <h3>Guest and room summary</h3>
+              <div className="data-table-wrap">
+                <table className="data-table compact-report-table">
+                  <tbody>
+                    <tr>
+                      <th>Unique rooms used</th>
+                      <td>{report.summary.uniqueRoomsUsed}</td>
+                    </tr>
+                    <tr>
+                      <th>Vehicle arrivals</th>
+                      <td>{report.summary.vehicleCount}</td>
+                    </tr>
+                    <tr>
+                      <th>Walk-ins</th>
+                      <td>{report.summary.walkInCount}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+
+          <h3>Package breakdown</h3>
+          <div className="data-table-wrap">
+            <table className="data-table compact-report-table">
+              <thead>
+                <tr>
+                  <th>Package</th>
+                  <th>Check-ins</th>
+                  <th>Revenue handled</th>
+                </tr>
+              </thead>
+              <tbody>
+                {report.packages.map((item) => (
+                  <tr key={item.durationHours}>
+                    <td>{item.durationHours} hours</td>
+                    <td>{item.count}</td>
+                    <td>{formatMoney(item.revenueCentavos)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="report-breakdown-grid">
+            <section>
+              <h3>Room usage</h3>
+              {report.roomUsage.length === 0 ? (
+                <p className="empty-state">No room usage for this period.</p>
+              ) : (
+                <div className="data-table-wrap">
+                  <table className="data-table compact-report-table">
+                    <thead>
+                      <tr>
+                        <th>Room</th>
+                        <th>Type</th>
+                        <th>Uses</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {report.roomUsage.map((item) => (
+                        <tr key={item.roomId}>
+                          <td>{item.roomNumber}</td>
+                          <td>{item.roomType}</td>
+                          <td>{item.uses}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </section>
+            <section>
+              <h3>Payment methods</h3>
+              <div className="data-table-wrap">
+                <table className="data-table compact-report-table">
+                  <thead>
+                    <tr>
+                      <th>Method</th>
+                      <th>Transactions</th>
+                      <th>Collected</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {report.paymentMethods.map((item) => (
+                      <tr key={item.method}>
+                        <td>
+                          {item.method === 'GCASH'
+                            ? 'GCash'
+                            : item.method === 'CASH'
+                              ? 'Cash'
+                              : 'Legacy / unknown'}
+                        </td>
+                        <td>{item.count}</td>
+                        <td>{formatMoney(item.amountCentavos)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+            <section>
+              <h3>Vehicle types</h3>
+              <div className="data-table-wrap">
+                <table className="data-table compact-report-table">
+                  <thead>
+                    <tr>
+                      <th>Type</th>
+                      <th>Arrivals</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {report.vehicleTypes.map((item) => (
+                      <tr key={item.type}>
+                        <td>{item.type.replaceAll('_', ' ')}</td>
+                        <td>{item.count}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+
+          <h3>Detailed activity</h3>
+          {report.activity.length === 0 ? (
+            <p className="empty-state">No recorded activity for this period.</p>
           ) : (
             <div className="data-table-wrap">
-              <table className="data-table">
+              <table className="data-table report-activity-table">
                 <thead>
                   <tr>
-                    <th>Room type</th>
-                    <th>Stays</th>
-                    <th>Payments</th>
+                    <th>Time</th>
+                    <th>Staff</th>
+                    <th>Action</th>
+                    <th>Room</th>
+                    <th>Stay</th>
+                    <th>Booking</th>
+                    <th>Amount / Change</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {report.byRoomType.map((item) => (
-                    <tr key={item.roomType}>
-                      <td>{item.roomType}</td>
-                      <td>{item.stays}</td>
-                      <td>{formatMoney(item.amountCentavos)}</td>
+                  {report.activity.map((item) => (
+                    <tr key={item.id}>
+                      <td>{formatDateTime(item.createdAt)}</td>
+                      <td>{item.staff?.username ?? 'Legacy / system'}</td>
+                      <td>{item.action.replaceAll('_', ' ')}</td>
+                      <td>{item.roomNumber ?? '—'}</td>
+                      <td>{item.stayId ? `#${item.stayId}` : '—'}</td>
+                      <td>{item.bookingId ? `#${item.bookingId}` : '—'}</td>
+                      <td>
+                        {item.amountCentavos !== null
+                          ? formatMoney(item.amountCentavos)
+                          : item.previousValue !== null ||
+                              item.newValue !== null
+                            ? `${String(item.previousValue ?? '—')} → ${String(
+                                item.newValue ?? '—',
+                              )}`
+                            : '—'}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -1541,6 +1929,7 @@ function CheckInDialog({
   const [arrivalType, setArrivalType] = useState<'VEHICLE' | 'WALK_IN'>(
     'VEHICLE',
   );
+  const [vehicleType, setVehicleType] = useState<VehicleType>('CAR');
   const [guestName, setGuestName] = useState('');
   const [plateNumber, setPlateNumber] = useState('');
   const [notes, setNotes] = useState('');
@@ -1562,6 +1951,7 @@ function CheckInDialog({
           roomId: room.id,
           durationHours: Number(durationHours),
           arrivalType,
+          vehicleType: arrivalType === 'VEHICLE' ? vehicleType : null,
           guestName,
           plateNumber: arrivalType === 'VEHICLE' ? plateNumber : null,
           notes,
@@ -1653,16 +2043,33 @@ function CheckInDialog({
             />
           </label>
           {arrivalType === 'VEHICLE' && (
-            <label>
-              Plate number <span className="optional">Optional</span>
-              <input
-                maxLength={30}
-                value={plateNumber}
-                onChange={(event) =>
-                  setPlateNumber(event.target.value.toUpperCase())
-                }
-              />
-            </label>
+            <>
+              <label>
+                Vehicle type
+                <select
+                  value={vehicleType}
+                  onChange={(event) =>
+                    setVehicleType(event.target.value as VehicleType)
+                  }
+                >
+                  <option value="MOTORCYCLE">Motorcycle</option>
+                  <option value="CAR">Car</option>
+                  <option value="VAN">Van</option>
+                  <option value="TRICYCLE">Tricycle</option>
+                  <option value="OTHER_VEHICLE">Other vehicle</option>
+                </select>
+              </label>
+              <label>
+                Plate number <span className="optional">Optional</span>
+                <input
+                  maxLength={30}
+                  value={plateNumber}
+                  onChange={(event) =>
+                    setPlateNumber(event.target.value.toUpperCase())
+                  }
+                />
+              </label>
+            </>
           )}
           <label>
             Notes <span className="optional">Optional</span>

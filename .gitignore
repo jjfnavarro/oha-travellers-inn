@@ -1,6 +1,7 @@
 node_modules/
 dist/
 coverage/
+backups/
 *.log
 .env
 .env.*
@@ -10,4 +11,3 @@ Thumbs.db
 .idea/
 .vscode/
 server/prisma/*.db
-

@@ -1,17 +1,21 @@
 # OHA Traveller's Inn Management System
 
-This repository contains the technical foundation and front-desk workflows through staff authentication, audit history, room inventory, active stays, reports, and automatic shifts.
+This repository contains the technical foundation and front-desk workflows through staff authentication, audit history, room inventory, active stays, bookings, reports, and automatic shifts.
 
-Reservations, bookings, refunds, discounts, adjustments, expenses, other income, and overdue charges are not implemented yet. Staff login and initial Owner/Front Desk authorization were completed in Milestone 5. Milestone 6 adds Cash/GCash payment records and paid stay extensions.
+Refunds, discounts, adjustments, expenses, other income, and overdue charges are not implemented yet. Staff login and initial Owner/Front Desk authorization were completed in Milestone 5. Milestone 6 adds Cash/GCash payment records and paid stay extensions.
 
 ## Development Roadmap
 
 The completed work is documented in `docs/milestone-1.md` through `docs/milestone-5.md`.
 
 - Milestone 6 establishes permanent staff attribution and an immutable financial transaction ledger. The current scope supports Owner and Front Desk accounts, Cash/GCash room charges, and paid stay extensions; the `ADMIN` role remains deferred.
-- Milestone 7 will add Owner-only overall and per-staff reporting, period and shift filters, financial and operational breakdowns, activity history, and matching PDF and Excel exports.
+- Milestone 7 adds Owner-only overall and per-staff reporting, period and shift filters, financial and operational breakdowns, activity history, and matching PDF and Excel exports.
+- Milestone 8 adds dated bookings, optional room assignment, overlap protection, status management, and atomic booking arrival conversion into a paid stay.
+- Milestone 8.5 adds checkout-to-cleaning, optional vehicle categories, concurrent check-in verification, reconnect recovery, offline write protection, login throttling, safe production errors, and atomic rate auditing.
+- Milestone 9 adds installable PWA metadata and icons, a network-required service worker, deployment and HTTPS guidance, and tested MySQL backup/restore scripts.
+- Milestone 10 acceptance is in progress. The isolated database-backed workflow, permissions, financial reconciliation, report exports, and restore reset have passed; physical Android tablet and full Day/Night operating-day sign-off remain.
 
-Milestone 7 remains documented future work. Its reporting APIs and user interface have not been implemented yet.
+Milestone 7 reports calculate money from immutable financial transactions and enforce Owner access on the backend. Booking actions appear in audit and Owner activity history, but bookings create no revenue until converted into a stay. Discounts, adjustments, refunds, vehicle subtypes, and the `ADMIN` role remain deferred.
 
 ## Prerequisites
 
@@ -137,6 +141,14 @@ System Connected
 
 The Rooms view displays all 28 configured rooms and their live occupancy. Employees can check guests in, check them out early, and monitor countdowns, five-minute warnings, and overdue stays. Select **Enable sound** once per browser session to permit audible warnings. The Rates view displays and edits offered stay durations.
 
+Checkout changes the room to **Cleaning**. After cleaning, staff must change its operational status to **Available** before another check-in. Cleaning, Maintenance, and Out-of-service rooms reject check-in on the backend.
+
+Active room data refreshes every 30 seconds, after browser reconnection, and when the app becomes visible after tablet sleep or application switching. Transactional writes are blocked while the browser reports that it is offline, and unreachable-server failures are reported without pretending a write succeeded.
+
+The primary front-desk device is an Android tablet running Google Chrome. Open the production HTTPS URL in Chrome and choose **Install app** or **Add to Home screen**. The installed PWA launches in standalone mode and still requires a network connection for check-ins, payments, booking changes, and other writes. Desktop, laptop, and mobile browsers remain supported. See `docs/deployment.md`, `docs/acceptance-testing.md`, and `docs/backup-and-restore.md` before live use.
+
+The Bookings view lets Owner and Front Desk accounts select a date, create or edit a booking, assign a room optionally, confirm, cancel, mark no-show, and convert an arrival into a paid stay. Room overlap validation is enforced by the backend. See `docs/booking-workflow.md` for the operating rules.
+
 Stay History provides date, room, room-type, status, and arrival filters. Reports use the motel's 8:00 AM operational-day boundary and support browser printing, PDF downloads, and Excel downloads. Day and Night shift records are assigned automatically using `Asia/Manila`.
 
 ## Quality Checks
@@ -149,6 +161,20 @@ npm run lint
 npm run typecheck
 npm run test
 npm run build
+```
+
+## Database Backup
+
+Create a local Docker MySQL backup:
+
+```powershell
+.\scripts\backup-database.ps1
+```
+
+Restore and verify it in the isolated test database:
+
+```powershell
+.\scripts\restore-backup-to-test.ps1 -BackupPath .\backups\oha-travellers-inn-YYYYMMDD-HHMMSS.sql
 ```
 
 ## Stop MySQL

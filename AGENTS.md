@@ -2,7 +2,15 @@
 
 ## Scope
 
-This repository contains the foundation and operational workflows through the current Milestone 6 work, including staff authentication, audit history, Cash/GCash room charges, and stay extensions. Milestone 7 plans Owner overall and per-staff reporting. Do not add reservations, bookings, refunds, discounts, adjustments, expenses, other income, overdue charges, or `ADMIN` until a milestone explicitly requires them.
+This repository contains the foundation and operational workflows through Milestone 9, including staff authentication, audit history, Cash/GCash room charges, stay extensions, Owner reporting, bookings, cleaning status, vehicle categories, operational hardening, PWA installation, deployment guidance, and tested backup/restore procedures. Do not add refunds, discounts, adjustments, expenses, other income, overdue charges, or `ADMIN` until a milestone explicitly requires them.
+
+## Target Platform
+
+- Build a responsive Progressive Web App primarily for an Android tablet running Google Chrome and installed in standalone mode.
+- Continue supporting desktop, laptop, and mobile browsers without converting the project into a native Android application.
+- Keep critical transactions network-only. Never queue or simulate successful financial or operational writes while offline.
+- Treat `expectedCheckoutAt` from authoritative database data as the source of truth after refresh, reconnection, sleep, or application switching.
+- Retain harmless iOS compatibility metadata, but do not describe iPad, iOS, or Safari as the primary deployment platform.
 
 ## Conventions
 

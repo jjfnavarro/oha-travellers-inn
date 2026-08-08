@@ -4,33 +4,60 @@ import PDFDocument from 'pdfkit';
 import writeXlsxFile, { type SheetData } from 'write-excel-file/node';
 import { z } from 'zod';
 import {
-  buildDailyReport,
-  buildStatistics,
-  type DailyReport,
-  type StatisticsPeriod,
-} from '../services/report.js';
-import { currentOperationalDate } from '../services/shift-time.js';
-
-function reportDate(value: unknown): string {
-  const result = z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/)
-    .safeParse(value);
-  return result.success ? result.data : currentOperationalDate();
-}
+  buildOwnerReport,
+  type OwnerReport,
+  type OwnerReportOptions,
+} from '../services/owner-report.js';
 
 function money(centavos: number): string {
   return `PHP ${(centavos / 100).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`;
 }
 
-function checkoutResult(stay: DailyReport['stays'][number]): string {
-  if (!stay.checkedOutAt) return stay.status;
-  if (stay.checkedOutAt < stay.expectedCheckoutAt) return 'EARLY';
-  if (stay.checkedOutAt > stay.expectedCheckoutAt) return 'OVERDUE';
-  return 'ON TIME';
+const ownerReportQuerySchema = z.object({
+  preset: z
+    .enum([
+      'current_shift',
+      'previous_shift',
+      'today',
+      'specific_date',
+      'week',
+      'month',
+      'custom',
+    ])
+    .default('today'),
+  shift: z.enum(['ALL', 'DAY', 'NIGHT']).default('ALL'),
+  date: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
+  from: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
+  to: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
+  staffId: z.coerce.number().int().positive().optional(),
+});
+
+function ownerReportOptions(query: unknown): OwnerReportOptions {
+  const result = ownerReportQuerySchema.safeParse(query);
+  if (!result.success) {
+    throw new Error('One or more report filters are invalid.');
+  }
+  return result.data;
 }
 
-async function createPdf(report: DailyReport): Promise<Buffer> {
+function ownerReportFilename(report: OwnerReport, extension: string): string {
+  const start = report.filters.startsAt.toISOString().slice(0, 10);
+  const suffix = report.selectedStaff
+    ? `-${report.selectedStaff.username.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`
+    : '';
+  return `oha-owner-report-${start}${suffix}.${extension}`;
+}
+
+async function createOwnerPdf(report: OwnerReport): Promise<Buffer> {
   const document = new PDFDocument({ margin: 40, size: 'A4' });
   const chunks: Buffer[] = [];
   document.on('data', (chunk: Buffer) => chunks.push(chunk));
@@ -38,44 +65,80 @@ async function createPdf(report: DailyReport): Promise<Buffer> {
     document.on('end', () => resolve(Buffer.concat(chunks)));
     document.on('error', reject);
   });
+  const addPageWhenNeeded = (height = 70) => {
+    if (document.y + height > 780) document.addPage();
+  };
 
   document.fontSize(18).text("OHA Traveller's Inn", { align: 'center' });
+  document.fontSize(13).text('Owner Report', { align: 'center' });
+  document.moveDown();
+  document.fontSize(10).text(`Period: ${report.filters.label}`);
+  document.text(`Shift: ${report.filters.shift}`);
+  document.text(
+    `View: ${report.selectedStaff ? `Staff - ${report.selectedStaff.username}` : 'Overall motel'}`,
+  );
+  document.moveDown();
   document
-    .fontSize(13)
-    .text(`Operational Day Report · ${report.date}`, { align: 'center' });
+    .fontSize(11)
+    .text('Operational summary', { underline: true })
+    .fontSize(10)
+    .text(`Check-ins: ${report.summary.totalCheckIns}`)
+    .text(`Completed stays: ${report.summary.completedStays}`)
+    .text(`Active stays created: ${report.summary.activeStays}`)
+    .text(`Unique rooms used: ${report.summary.uniqueRoomsUsed}`)
+    .text(`Extensions: ${report.summary.extensionCount}`)
+    .text(`Overdue checkouts: ${report.summary.overdueCheckoutCount}`);
   document.moveDown();
-  document.fontSize(10).text(`Total stays: ${report.summary.totalStays}`);
-  document.text(
-    `Total room payments: ${money(report.summary.totalAmountCentavos)}`,
-  );
-  document.text(
-    `Vehicle: ${report.summary.vehicleStays}  Walk-in: ${report.summary.walkInStays}`,
-  );
-  document.text(
-    `Early checkouts: ${report.summary.earlyCheckouts}  Overdue checkouts: ${report.summary.overdueCheckouts}`,
-  );
+  document
+    .fontSize(11)
+    .text('Financial summary', { underline: true })
+    .fontSize(10)
+    .text(`Room charges: ${money(report.financial.grossRoomRevenueCentavos)}`)
+    .text(
+      `Extension charges: ${money(report.financial.extensionRevenueCentavos)}`,
+    )
+    .text(`Gross revenue: ${money(report.financial.grossRevenueCentavos)}`)
+    .text(`Net revenue: ${money(report.financial.netRevenueCentavos)}`)
+    .text(`Total collected: ${money(report.financial.totalCollectedCentavos)}`);
   document.moveDown();
-  document.fontSize(11).text('Stay Details', { underline: true });
-  document.moveDown(0.5);
-  for (const stay of report.stays) {
-    if (document.y > 740) document.addPage();
+  document.fontSize(11).text('Package breakdown', { underline: true });
+  for (const item of report.packages) {
     document
       .fontSize(9)
       .text(
-        `Room ${stay.room.number} · ${stay.room.roomType.name} · ${stay.durationHours}h · ${money(stay.paidAmountCentavos)} · ${checkoutResult(stay)}`,
+        `${item.durationHours} hours: ${item.count} check-ins - ${money(item.revenueCentavos)}`,
       );
+  }
+  document.moveDown();
+  document.fontSize(11).text('Room usage', { underline: true });
+  for (const item of report.roomUsage) {
+    addPageWhenNeeded(20);
     document
-      .fillColor('#555555')
+      .fontSize(9)
+      .text(`Room ${item.roomNumber} (${item.roomType}): ${item.uses} uses`);
+  }
+  document.moveDown();
+  document.fontSize(11).text('Vehicle types', { underline: true });
+  for (const item of report.vehicleTypes) {
+    document
+      .fontSize(9)
+      .text(`${item.type.replaceAll('_', ' ')}: ${item.count}`);
+  }
+  document.moveDown();
+  document.fontSize(11).text('Activity', { underline: true });
+  for (const item of report.activity) {
+    addPageWhenNeeded(30);
+    document
+      .fontSize(9)
       .text(
-        `${stay.checkedInAt.toISOString()} → ${stay.checkedOutAt?.toISOString() ?? 'Active'}`,
+        `${item.createdAt.toISOString()} - ${item.staff?.username ?? 'Legacy/System'} - ${item.action.replaceAll('_', ' ')}${item.roomNumber ? ` - Room ${item.roomNumber}` : ''}${item.bookingId ? ` - Booking #${item.bookingId}` : ''}${item.amountCentavos !== null ? ` - ${money(item.amountCentavos)}` : ''}`,
       );
-    document.fillColor('#000000').moveDown(0.5);
   }
   document.end();
   return finished;
 }
 
-async function createWorkbook(report: DailyReport): Promise<Buffer> {
+async function createOwnerWorkbook(report: OwnerReport): Promise<Buffer> {
   const header = (value: string) => ({
     value,
     fontWeight: 'bold' as const,
@@ -83,117 +146,160 @@ async function createWorkbook(report: DailyReport): Promise<Buffer> {
   });
   const data: SheetData = [
     [
-      { value: "OHA Traveller's Inn", fontWeight: 'bold', fontSize: 16 },
-      { value: '' },
+      {
+        value: "OHA Traveller's Inn Owner Report",
+        fontWeight: 'bold',
+        fontSize: 16,
+      },
     ],
-    [{ value: 'Operational day' }, { value: report.date }],
-    [{ value: 'Total stays' }, { value: report.summary.totalStays }],
+    [{ value: 'Period' }, { value: report.filters.label }],
+    [{ value: 'Shift' }, { value: report.filters.shift }],
     [
-      { value: 'Total room payments' },
-      { value: report.summary.totalAmountCentavos / 100, format: '₱#,##0.00' },
-    ],
-    [{ value: 'Active stays' }, { value: report.summary.activeStays }],
-    [{ value: 'Vehicle stays' }, { value: report.summary.vehicleStays }],
-    [{ value: 'Walk-in stays' }, { value: report.summary.walkInStays }],
-    [{ value: 'Early checkouts' }, { value: report.summary.earlyCheckouts }],
-    [
-      { value: 'Overdue checkouts' },
-      { value: report.summary.overdueCheckouts },
+      { value: 'View' },
+      { value: report.selectedStaff?.username ?? 'Overall motel' },
     ],
     [],
+    [header('Operational summary'), header('Value')],
+    [{ value: 'Check-ins' }, { value: report.summary.totalCheckIns }],
+    [{ value: 'Completed stays' }, { value: report.summary.completedStays }],
+    [{ value: 'Active stays created' }, { value: report.summary.activeStays }],
+    [{ value: 'Unique rooms used' }, { value: report.summary.uniqueRoomsUsed }],
+    [{ value: 'Extensions' }, { value: report.summary.extensionCount }],
     [
-      header('ID'),
-      header('Room'),
-      header('Type'),
-      header('Shift'),
-      header('Arrival'),
-      header('Guest'),
-      header('Plate'),
-      header('Hours'),
-      header('Paid'),
-      header('Check-in'),
-      header('Expected checkout'),
-      header('Actual checkout'),
-      header('Result'),
+      { value: 'Overdue checkouts' },
+      { value: report.summary.overdueCheckoutCount },
     ],
+    [],
+    [header('Financial summary'), header('PHP')],
+    [
+      { value: 'Room charges' },
+      {
+        value: report.financial.grossRoomRevenueCentavos / 100,
+        format: '₱#,##0.00',
+      },
+    ],
+    [
+      { value: 'Extension charges' },
+      {
+        value: report.financial.extensionRevenueCentavos / 100,
+        format: '₱#,##0.00',
+      },
+    ],
+    [
+      { value: 'Gross revenue' },
+      {
+        value: report.financial.grossRevenueCentavos / 100,
+        format: '₱#,##0.00',
+      },
+    ],
+    [
+      { value: 'Net revenue' },
+      { value: report.financial.netRevenueCentavos / 100, format: '₱#,##0.00' },
+    ],
+    [],
+    [header('Package'), header('Check-ins'), header('Revenue')],
+    ...report.packages.map((item) => [
+      { value: `${item.durationHours} hours` },
+      { value: item.count },
+      { value: item.revenueCentavos / 100, format: '₱#,##0.00' },
+    ]),
+    [],
+    [header('Room'), header('Type'), header('Uses')],
+    ...report.roomUsage.map((item) => [
+      { value: item.roomNumber },
+      { value: item.roomType },
+      { value: item.uses },
+    ]),
+    [],
+    [header('Vehicle type'), header('Arrivals')],
+    ...report.vehicleTypes.map((item) => [
+      { value: item.type.replaceAll('_', ' ') },
+      { value: item.count },
+    ]),
+    [],
+    [
+      header('Activity time'),
+      header('Staff'),
+      header('Action'),
+      header('Room'),
+      header('Stay ID'),
+      header('Booking ID'),
+      header('Amount'),
+    ],
+    ...report.activity.map((item) => [
+      { value: item.createdAt, format: 'yyyy-mm-dd hh:mm' },
+      { value: item.staff?.username ?? 'Legacy/System' },
+      { value: item.action.replaceAll('_', ' ') },
+      { value: item.roomNumber ?? '' },
+      { value: item.stayId ?? '' },
+      { value: item.bookingId ?? '' },
+      item.amountCentavos === null
+        ? { value: '' }
+        : { value: item.amountCentavos / 100, format: '₱#,##0.00' },
+    ]),
   ];
-  for (const stay of report.stays) {
-    data.push([
-      { value: stay.id },
-      { value: stay.room.number },
-      { value: stay.room.roomType.name },
-      { value: stay.shift?.type ?? '' },
-      { value: stay.arrivalType },
-      { value: stay.guestName ?? '' },
-      { value: stay.plateNumber ?? '' },
-      { value: stay.durationHours },
-      { value: stay.paidAmountCentavos / 100, format: '₱#,##0.00' },
-      { value: stay.checkedInAt, format: 'yyyy-mm-dd hh:mm' },
-      { value: stay.expectedCheckoutAt, format: 'yyyy-mm-dd hh:mm' },
-      { value: stay.checkedOutAt ?? '', format: 'yyyy-mm-dd hh:mm' },
-      { value: checkoutResult(stay) },
-    ]);
-  }
   return writeXlsxFile(data, {
-    columns: [10, 10, 16, 12, 14, 22, 16, 10, 14, 22, 22, 22, 14].map(
-      (width) => ({ width }),
-    ),
+    columns: [24, 22, 20, 16, 14, 14, 16].map((width) => ({ width })),
   }).toBuffer();
 }
 
 export function createReportsRouter(prisma: PrismaClient): Router {
   const router = Router();
 
-  router.get('/statistics', async (request, response) => {
-    const period = z
-      .enum(['day', 'week', 'month'])
-      .catch('day')
-      .parse(request.query.period);
-    response.json({
-      data: await buildStatistics(
-        prisma,
-        reportDate(request.query.date),
-        period as StatisticsPeriod,
-      ),
-    });
-  });
-
-  router.get('/daily', async (request, response) => {
+  router.get('/owner', async (request, response) => {
     try {
       response.json({
-        data: await buildDailyReport(prisma, reportDate(request.query.date)),
+        data: await buildOwnerReport(prisma, ownerReportOptions(request.query)),
       });
     } catch (error: unknown) {
       response.status(400).json({
         message:
-          error instanceof Error ? error.message : 'Invalid report date.',
+          error instanceof Error ? error.message : 'The report is invalid.',
       });
     }
   });
 
-  router.get('/daily.pdf', async (request, response) => {
-    const date = reportDate(request.query.date);
-    const buffer = await createPdf(await buildDailyReport(prisma, date));
-    response.setHeader('Content-Type', 'application/pdf');
-    response.setHeader(
-      'Content-Disposition',
-      `attachment; filename="oha-report-${date}.pdf"`,
-    );
-    response.send(buffer);
+  router.get('/owner.pdf', async (request, response) => {
+    try {
+      const report = await buildOwnerReport(
+        prisma,
+        ownerReportOptions(request.query),
+      );
+      response.setHeader('Content-Type', 'application/pdf');
+      response.setHeader(
+        'Content-Disposition',
+        `attachment; filename="${ownerReportFilename(report, 'pdf')}"`,
+      );
+      response.send(await createOwnerPdf(report));
+    } catch (error: unknown) {
+      response.status(400).json({
+        message:
+          error instanceof Error ? error.message : 'The report is invalid.',
+      });
+    }
   });
 
-  router.get('/daily.xlsx', async (request, response) => {
-    const date = reportDate(request.query.date);
-    const buffer = await createWorkbook(await buildDailyReport(prisma, date));
-    response.setHeader(
-      'Content-Type',
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    );
-    response.setHeader(
-      'Content-Disposition',
-      `attachment; filename="oha-report-${date}.xlsx"`,
-    );
-    response.send(buffer);
+  router.get('/owner.xlsx', async (request, response) => {
+    try {
+      const report = await buildOwnerReport(
+        prisma,
+        ownerReportOptions(request.query),
+      );
+      response.setHeader(
+        'Content-Type',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      );
+      response.setHeader(
+        'Content-Disposition',
+        `attachment; filename="${ownerReportFilename(report, 'xlsx')}"`,
+      );
+      response.send(await createOwnerWorkbook(report));
+    } catch (error: unknown) {
+      response.status(400).json({
+        message:
+          error instanceof Error ? error.message : 'The report is invalid.',
+      });
+    }
   });
 
   return router;

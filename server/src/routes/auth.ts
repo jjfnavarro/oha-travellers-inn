@@ -15,11 +15,20 @@ const loginSchema = z.object({
   password: z.string().min(1).max(200),
 });
 
+const maximumFailedLogins = 5;
+const loginWindowMilliseconds = 15 * 60 * 1000;
+
+interface FailedLogin {
+  count: number;
+  resetsAt: number;
+}
+
 export function createAuthRouter(
   prisma: PrismaClient,
   environment: Environment,
 ): Router {
   const router = Router();
+  const failedLogins = new Map<string, FailedLogin>();
 
   router.post('/login', async (request, response) => {
     const result = loginSchema.safeParse(request.body);
@@ -27,6 +36,25 @@ export function createAuthRouter(
       response
         .status(400)
         .json({ message: 'Enter your username and password.' });
+      return;
+    }
+
+    const now = Date.now();
+    const loginKey = `${request.ip}:${result.data.username.toLowerCase()}`;
+    const existingFailure = failedLogins.get(loginKey);
+    if (existingFailure && existingFailure.resetsAt <= now) {
+      failedLogins.delete(loginKey);
+    } else if (
+      existingFailure &&
+      existingFailure.count >= maximumFailedLogins
+    ) {
+      response.setHeader(
+        'Retry-After',
+        String(Math.ceil((existingFailure.resetsAt - now) / 1000)),
+      );
+      response.status(429).json({
+        message: 'Too many failed login attempts. Try again later.',
+      });
       return;
     }
 
@@ -38,11 +66,17 @@ export function createAuthRouter(
       !staff.isActive ||
       !(await compare(result.data.password, staff.passwordHash))
     ) {
+      const failure = failedLogins.get(loginKey);
+      failedLogins.set(loginKey, {
+        count: (failure?.count ?? 0) + 1,
+        resetsAt: failure?.resetsAt ?? now + loginWindowMilliseconds,
+      });
       response
         .status(401)
         .json({ message: 'Username or password is incorrect.' });
       return;
     }
+    failedLogins.delete(loginKey);
 
     const token = randomBytes(32).toString('base64url');
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
