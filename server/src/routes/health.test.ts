@@ -42,4 +42,18 @@ describe('GET /api/health', () => {
       database: 'unavailable',
     });
   });
+
+  test('does not return the frontend for an unknown production API route', async () => {
+    const response = await request(
+      createApp(
+        { ...environment, NODE_ENV: 'production' },
+        vi.fn().mockResolvedValue(undefined),
+      ),
+    )
+      .get('/api/missing')
+      .set('Accept', 'text/html');
+
+    expect(response.status).toBe(404);
+    expect(response.body).toEqual({ message: 'Route not found.' });
+  });
 });

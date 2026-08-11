@@ -22,6 +22,8 @@ MySQL
 
 The same web deployment supports desktop, laptop, and mobile browsers. Do not package it as a native Android application.
 
+Product records store image paths or URLs only. The built-in upload endpoint writes validated JPEG, PNG, and WebP files to `PRODUCT_IMAGE_DIR`. In production, this directory must point to a persistent mounted disk. A managed object-storage adapter or reputable image CDN remains the preferred option when the final hosting provider is selected. Never use ephemeral application-server storage or MySQL binary columns for production uploads. If an image is unavailable, the client displays the bundled OHA fallback image.
+
 ## Recommended: Cloud Application and Managed MySQL
 
 The recommended first production design is:
@@ -34,6 +36,32 @@ The recommended first production design is:
 This supports the Owner checking reports from a phone outside the motel, removes dependence on one motel computer remaining online, and lets the database provider manage availability and automated backups. Tradeoffs are a monthly cost, internet dependency, and the need to maintain hosting accounts.
 
 Use one domain or same-site subdomains so secure cookie authentication remains predictable. Set CORS to the exact frontend HTTPS origin. Never use `*` with credentialed requests.
+
+### Testing deployment on Railway
+
+The repository includes a production `Dockerfile` and `railway.json`. The container serves the built React PWA and Express API from one HTTPS origin, which keeps session cookies reliable on mobile devices.
+
+Create a Railway project with:
+
+- One application service connected to this GitHub repository
+- One private MySQL service
+- One application volume mounted at `/data/product-images`
+- Public networking enabled only for the application service
+- Health check path `/api/health`
+
+Set these application variables:
+
+```text
+NODE_ENV=production
+DATABASE_URL=<private MySQL connection URL>
+CLIENT_URL=https://<generated application domain>
+PRODUCT_IMAGE_DIR=/data/product-images
+BUSINESS_TIMEZONE=Asia/Manila
+```
+
+`VITE_API_URL` is intentionally omitted for this single-origin deployment; the production client uses `/api`. Railway runs committed Prisma migrations before starting the application. On the first deployment only, open a trusted application-service shell and run `npm run prisma:seed` followed by `npm run users:seed` with strong initial password variables. Do not repeat these seed commands automatically on every deployment because the room seed contains the original configured rates and the user seed resets passwords.
+
+Railway provides an HTTPS domain automatically and supports private service networking and persistent volumes. Product images will be lost on redeploy if the application volume is omitted.
 
 ## Alternative: Local Motel Server
 
@@ -58,6 +86,7 @@ PORT=4000
 DATABASE_URL=mysql://USER:PASSWORD@PRIVATE_HOST:3306/DATABASE
 SHADOW_DATABASE_URL=mysql://MIGRATION_USER:PASSWORD@PRIVATE_HOST:3306/SHADOW_DATABASE
 CLIENT_URL=https://your-app-domain.example
+PRODUCT_IMAGE_DIR=/persistent-storage/oha-product-images
 BUSINESS_TIMEZONE=Asia/Manila
 ```
 
@@ -101,7 +130,7 @@ Serve `client\dist` as the static frontend. Do not run Vite's development server
 1. Run formatting, linting, type checks, tests, and builds.
 2. Create and verify a database backup.
 3. Apply migrations before starting the new backend.
-4. Verify health, login, room board, booking list, and Owner reports.
+4. Verify health, login, room board, booking list, Mini Store purchase, and Owner reports.
 5. On the physical Android tablet, install from Chrome and test standalone portrait and landscape operation.
 6. Verify an offline write is blocked.
 7. Monitor server errors after release.

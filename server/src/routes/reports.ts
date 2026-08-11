@@ -8,6 +8,7 @@ import {
   type OwnerReport,
   type OwnerReportOptions,
 } from '../services/owner-report.js';
+import { drawRevenueCharts } from './report-pdf-charts.js';
 
 function money(centavos: number): string {
   return `PHP ${(centavos / 100).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`;
@@ -26,6 +27,8 @@ const ownerReportQuerySchema = z.object({
     ])
     .default('today'),
   shift: z.enum(['ALL', 'DAY', 'NIGHT']).default('ALL'),
+  scope: z.enum(['OVERALL', 'ROOMS']).default('OVERALL'),
+  paymentMethod: z.enum(['CASH', 'GCASH']).optional(),
   date: z
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/)
@@ -54,7 +57,8 @@ function ownerReportFilename(report: OwnerReport, extension: string): string {
   const suffix = report.selectedStaff
     ? `-${report.selectedStaff.username.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`
     : '';
-  return `oha-owner-report-${start}${suffix}.${extension}`;
+  const scope = report.filters.scope === 'ROOMS' ? 'rooms' : 'overall';
+  return `oha-${scope}-report-${start}${suffix}.${extension}`;
 }
 
 async function createOwnerPdf(report: OwnerReport): Promise<Buffer> {
@@ -70,10 +74,15 @@ async function createOwnerPdf(report: OwnerReport): Promise<Buffer> {
   };
 
   document.fontSize(18).text("OHA Traveller's Inn", { align: 'center' });
-  document.fontSize(13).text('Owner Report', { align: 'center' });
+  document
+    .fontSize(13)
+    .text(report.filters.scope === 'ROOMS' ? 'Room Report' : 'Overall Report', {
+      align: 'center',
+    });
   document.moveDown();
   document.fontSize(10).text(`Period: ${report.filters.label}`);
   document.text(`Shift: ${report.filters.shift}`);
+  document.text(`Payment: ${report.filters.paymentMethod}`);
   document.text(
     `View: ${report.selectedStaff ? `Staff - ${report.selectedStaff.username}` : 'Overall motel'}`,
   );
@@ -96,10 +105,45 @@ async function createOwnerPdf(report: OwnerReport): Promise<Buffer> {
     .text(`Room charges: ${money(report.financial.grossRoomRevenueCentavos)}`)
     .text(
       `Extension charges: ${money(report.financial.extensionRevenueCentavos)}`,
-    )
+    );
+  if (report.filters.scope === 'OVERALL') {
+    document
+      .text(`Store revenue: ${money(report.financial.storeRevenueCentavos)}`)
+      .text(
+        `Extra charges: ${money(report.financial.extraChargesRevenueCentavos)}`,
+      );
+  }
+  document
     .text(`Gross revenue: ${money(report.financial.grossRevenueCentavos)}`)
     .text(`Net revenue: ${money(report.financial.netRevenueCentavos)}`)
     .text(`Total collected: ${money(report.financial.totalCollectedCentavos)}`);
+  document.moveDown();
+  drawRevenueCharts(document, report.revenueTrend, [
+    {
+      label: 'Rooms',
+      amountCentavos: report.financial.grossRoomRevenueCentavos,
+      color: '#1c1c1c',
+    },
+    {
+      label: 'Extensions',
+      amountCentavos: report.financial.extensionRevenueCentavos,
+      color: '#707070',
+    },
+    ...(report.filters.scope === 'OVERALL'
+      ? [
+          {
+            label: 'Store',
+            amountCentavos: report.financial.storeRevenueCentavos,
+            color: '#18823b',
+          },
+          {
+            label: 'Extras',
+            amountCentavos: report.financial.extraChargesRevenueCentavos,
+            color: '#a05a2c',
+          },
+        ]
+      : []),
+  ]);
   document.moveDown();
   document.fontSize(11).text('Package breakdown', { underline: true });
   for (const item of report.packages) {
@@ -144,16 +188,39 @@ async function createOwnerWorkbook(report: OwnerReport): Promise<Buffer> {
     fontWeight: 'bold' as const,
     backgroundColor: '#E5E5E5',
   });
+  const storeRevenueRows: SheetData =
+    report.filters.scope === 'OVERALL'
+      ? [
+          [
+            { value: 'Store revenue' },
+            {
+              value: report.financial.storeRevenueCentavos / 100,
+              format: '₱#,##0.00',
+            },
+          ],
+          [
+            { value: 'Extra charges' },
+            {
+              value: report.financial.extraChargesRevenueCentavos / 100,
+              format: '₱#,##0.00',
+            },
+          ],
+        ]
+      : [];
   const data: SheetData = [
     [
       {
-        value: "OHA Traveller's Inn Owner Report",
+        value:
+          report.filters.scope === 'ROOMS'
+            ? "OHA Traveller's Inn Room Report"
+            : "OHA Traveller's Inn Overall Report",
         fontWeight: 'bold',
         fontSize: 16,
       },
     ],
     [{ value: 'Period' }, { value: report.filters.label }],
     [{ value: 'Shift' }, { value: report.filters.shift }],
+    [{ value: 'Payment' }, { value: report.filters.paymentMethod }],
     [
       { value: 'View' },
       { value: report.selectedStaff?.username ?? 'Overall motel' },
@@ -185,6 +252,7 @@ async function createOwnerWorkbook(report: OwnerReport): Promise<Buffer> {
         format: '₱#,##0.00',
       },
     ],
+    ...storeRevenueRows,
     [
       { value: 'Gross revenue' },
       {
@@ -196,6 +264,23 @@ async function createOwnerWorkbook(report: OwnerReport): Promise<Buffer> {
       { value: 'Net revenue' },
       { value: report.financial.netRevenueCentavos / 100, format: '₱#,##0.00' },
     ],
+    [],
+    [
+      header('Trend period'),
+      header('Total revenue'),
+      header('Room charges'),
+      header('Extensions'),
+      header('Store'),
+      header('Extra charges'),
+    ],
+    ...report.revenueTrend.map((point) => [
+      { value: point.label },
+      { value: point.totalRevenueCentavos / 100, format: '₱#,##0.00' },
+      { value: point.roomRevenueCentavos / 100, format: '₱#,##0.00' },
+      { value: point.extensionRevenueCentavos / 100, format: '₱#,##0.00' },
+      { value: point.storeRevenueCentavos / 100, format: '₱#,##0.00' },
+      { value: point.extraChargesRevenueCentavos / 100, format: '₱#,##0.00' },
+    ]),
     [],
     [header('Package'), header('Check-ins'), header('Revenue')],
     ...report.packages.map((item) => [
@@ -224,6 +309,7 @@ async function createOwnerWorkbook(report: OwnerReport): Promise<Buffer> {
       header('Room'),
       header('Stay ID'),
       header('Booking ID'),
+      header('Store sale ID'),
       header('Amount'),
     ],
     ...report.activity.map((item) => [
@@ -233,13 +319,14 @@ async function createOwnerWorkbook(report: OwnerReport): Promise<Buffer> {
       { value: item.roomNumber ?? '' },
       { value: item.stayId ?? '' },
       { value: item.bookingId ?? '' },
+      { value: item.storeSaleId ?? '' },
       item.amountCentavos === null
         ? { value: '' }
         : { value: item.amountCentavos / 100, format: '₱#,##0.00' },
     ]),
   ];
   return writeXlsxFile(data, {
-    columns: [24, 22, 20, 16, 14, 14, 16].map((width) => ({ width })),
+    columns: [24, 22, 20, 16, 14, 14, 16, 16].map((width) => ({ width })),
   }).toBuffer();
 }
 

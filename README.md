@@ -14,6 +14,7 @@ The completed work is documented in `docs/milestone-1.md` through `docs/mileston
 - Milestone 8.5 adds checkout-to-cleaning, optional vehicle categories, concurrent check-in verification, reconnect recovery, offline write protection, login throttling, safe production errors, and atomic rate auditing.
 - Milestone 9 adds installable PWA metadata and icons, a network-required service worker, deployment and HTTPS guidance, and tested MySQL backup/restore scripts.
 - Milestone 10 acceptance is in progress. The isolated database-backed workflow, permissions, financial reconciliation, report exports, and restore reset have passed; physical Android tablet and full Day/Night operating-day sign-off remain.
+- The Mini Store milestone adds configurable store products and extra charges, optional active-room linking, Cash/GCash purchases, immutable historical prices, staff attribution, and Owner store reporting.
 
 Milestone 7 reports calculate money from immutable financial transactions and enforce Owner access on the backend. Booking actions appear in audit and Owner activity history, but bookings create no revenue until converted into a stay. Discounts, adjustments, refunds, vehicle subtypes, and the `ADMIN` role remain deferred.
 
@@ -139,7 +140,7 @@ OHA Traveller's Inn
 System Connected
 ```
 
-The Rooms view displays all 28 configured rooms and their live occupancy. Employees can check guests in, check them out early, and monitor countdowns, five-minute warnings, and overdue stays. Select **Enable sound** once per browser session to permit audible warnings. The Rates view displays and edits offered stay durations.
+The Rooms view displays all 28 configured rooms and their live occupancy. Employees can check guests in, check them out early, and monitor countdowns, ten-minute warnings, and overdue stays. Front Desk sound is armed by the first tap or key press after opening the app and cannot be disabled; Owner sessions remain silent. The Rates view displays and edits offered stay durations.
 
 Checkout changes the room to **Cleaning**. After cleaning, staff must change its operational status to **Available** before another check-in. Cleaning, Maintenance, and Out-of-service rooms reject check-in on the backend.
 
@@ -148,6 +149,8 @@ Active room data refreshes every 30 seconds, after browser reconnection, and whe
 The primary front-desk device is an Android tablet running Google Chrome. Open the production HTTPS URL in Chrome and choose **Install app** or **Add to Home screen**. The installed PWA launches in standalone mode and still requires a network connection for check-ins, payments, booking changes, and other writes. Desktop, laptop, and mobile browsers remain supported. See `docs/deployment.md`, `docs/acceptance-testing.md`, and `docs/backup-and-restore.md` before live use.
 
 The Bookings view lets Owner and Front Desk accounts select a date, create or edit a booking, assign a room optionally, confirm, cancel, mark no-show, and convert an arrival into a paid stay. Room overlap validation is enforced by the backend. See `docs/booking-workflow.md` for the operating rules.
+
+The Mini Store view lets both roles sell active products and extra charges without typing product names. The Owner manages catalog prices, images, categories, and availability. Store, Rooms, and Overall reporting are selected within the Reports view. See `docs/mini-store.md`.
 
 Stay History provides date, room, room-type, status, and arrival filters. Reports use the motel's 8:00 AM operational-day boundary and support browser printing, PDF downloads, and Excel downloads. Day and Night shift records are assigned automatically using `Asia/Manila`.
 

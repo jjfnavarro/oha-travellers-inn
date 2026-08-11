@@ -6,9 +6,10 @@ const environmentSchema = z.object({
     .default('development'),
   PORT: z.coerce.number().int().positive().max(65_535).default(4000),
   DATABASE_URL: z.string().url().startsWith('mysql://'),
-  SHADOW_DATABASE_URL: z.string().url().startsWith('mysql://'),
+  SHADOW_DATABASE_URL: z.string().url().startsWith('mysql://').optional(),
   CLIENT_URL: z.string().url(),
   BUSINESS_TIMEZONE: z.string().min(1).default('Asia/Manila'),
+  PRODUCT_IMAGE_DIR: z.string().trim().min(1).optional(),
 });
 
 export type Environment = z.infer<typeof environmentSchema>;

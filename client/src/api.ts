@@ -1,5 +1,6 @@
 export const apiUrl =
-  import.meta.env.VITE_API_URL ?? 'http://localhost:4000/api';
+  import.meta.env.VITE_API_URL ??
+  (import.meta.env.PROD ? '/api' : 'http://localhost:4000/api');
 
 export async function apiRequest<T>(
   path: string,

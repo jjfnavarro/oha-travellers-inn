@@ -53,6 +53,13 @@ enum PaymentMethod {
 enum FinancialTransactionType {
   ROOM_CHARGE
   EXTENSION_CHARGE
+  STORE_SALE
+  EXTRA_CHARGE
+}
+
+enum ProductCategory {
+  STORE_PRODUCT
+  EXTRA_CHARGE
 }
 
 enum BookingStatus {
@@ -127,6 +134,7 @@ model Stay {
   checkedOutAt          DateTime?
   extensions            StayExtension[]
   financialTransactions FinancialTransaction[]
+  storeSales            StoreSale[]
   booking               Booking?
   createdAt             DateTime               @default(now())
   updatedAt             DateTime               @updatedAt
@@ -152,6 +160,9 @@ model StaffAccount {
   handledTransactions FinancialTransaction[]
   createdBookings     Booking[]             @relation("BookingCreatedBy")
   updatedBookings     Booking[]             @relation("BookingUpdatedBy")
+  createdProducts     Product[]             @relation("ProductCreatedBy")
+  updatedProducts     Product[]             @relation("ProductUpdatedBy")
+  handledStoreSales   StoreSale[]
   createdAt           DateTime               @default(now())
   updatedAt           DateTime               @updatedAt
 }
@@ -203,6 +214,8 @@ model FinancialTransaction {
   id              Int                      @id @default(autoincrement())
   stayId          Int?
   stay            Stay?                    @relation(fields: [stayId], references: [id], onDelete: Restrict)
+  storeSaleId     Int?
+  storeSale       StoreSale?               @relation(fields: [storeSaleId], references: [id], onDelete: Restrict)
   handledById     Int?
   handledBy       StaffAccount?            @relation(fields: [handledById], references: [id], onDelete: Restrict)
   transactionType FinancialTransactionType
@@ -212,8 +225,65 @@ model FinancialTransaction {
   createdAt       DateTime                 @default(now())
 
   @@index([stayId, createdAt])
+  @@index([storeSaleId, createdAt])
   @@index([handledById, createdAt])
   @@index([transactionType, createdAt])
+}
+
+model Product {
+  id                    Int             @id @default(autoincrement())
+  name                  String          @unique @db.VarChar(100)
+  category              ProductCategory
+  sellingPriceCentavos  Int
+  imageUrl              String?         @db.VarChar(2048)
+  isActive              Boolean         @default(true)
+  createdByUserId       Int
+  createdBy             StaffAccount    @relation("ProductCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  updatedByUserId       Int
+  updatedBy             StaffAccount    @relation("ProductUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: Restrict)
+  saleItems             StoreSaleItem[]
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+
+  @@index([category, isActive])
+  @@index([createdByUserId])
+  @@index([updatedByUserId])
+}
+
+model StoreSale {
+  id                  Int                    @id @default(autoincrement())
+  handledByUserId     Int
+  handledBy           StaffAccount           @relation(fields: [handledByUserId], references: [id], onDelete: Restrict)
+  stayId              Int?
+  stay                Stay?                  @relation(fields: [stayId], references: [id], onDelete: Restrict)
+  paymentMethod       PaymentMethod
+  totalAmountCentavos Int
+  idempotencyKey      String                 @unique @db.Char(36)
+  items               StoreSaleItem[]
+  financialTransactions FinancialTransaction[]
+  createdAt           DateTime               @default(now())
+
+  @@index([handledByUserId, createdAt])
+  @@index([stayId, createdAt])
+  @@index([createdAt])
+}
+
+model StoreSaleItem {
+  id                      Int             @id @default(autoincrement())
+  storeSaleId             Int
+  storeSale               StoreSale       @relation(fields: [storeSaleId], references: [id], onDelete: Restrict)
+  productId               Int
+  product                 Product         @relation(fields: [productId], references: [id], onDelete: Restrict)
+  productNameSnapshot     String          @db.VarChar(100)
+  categorySnapshot        ProductCategory
+  unitPriceCentavos       Int
+  quantity                Int
+  lineTotalCentavos       Int
+  createdAt               DateTime        @default(now())
+
+  @@index([storeSaleId])
+  @@index([productId, createdAt])
+  @@index([categorySnapshot, createdAt])
 }
 
 model Shift {

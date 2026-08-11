@@ -1,4 +1,12 @@
-import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  lazy,
+  Suspense,
+  type FormEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   BadgeDollarSign,
   BedDouble,
@@ -10,17 +18,30 @@ import {
   LogOut,
   PanelLeftClose,
   PanelLeftOpen,
+  ShoppingBasket,
   Users,
 } from 'lucide-react';
 import { getOccupancyStatus, type OccupancyStatus } from './stay-status';
+import { buzzerDurationSeconds, claimStayAlert } from './stay-alerts';
 import { apiRequest, apiUrl } from './api';
 import { BookingsView } from './BookingsView';
+import { resolveHistoryWindow, type HistoryPeriod } from './history-period';
+import { MiniStoreView } from './MiniStoreView';
+import type { RevenueTrendPoint } from './RevenueCharts';
+import { StoreReportView } from './StoreReportView';
+
+const RevenueCharts = lazy(() =>
+  import('./RevenueCharts').then((module) => ({
+    default: module.RevenueCharts,
+  })),
+);
 
 type OperationalStatus = 'ACTIVE' | 'CLEANING' | 'MAINTENANCE' | 'INACTIVE';
 type VehicleType = 'MOTORCYCLE' | 'CAR' | 'VAN' | 'TRICYCLE' | 'OTHER_VEHICLE';
 type View =
   | 'rooms'
   | 'bookings'
+  | 'store'
   | 'history'
   | 'reports'
   | 'shifts'
@@ -144,10 +165,10 @@ export default function App() {
   const [checkInRoom, setCheckInRoom] = useState<Room | null>(null);
   const [extendRoom, setExtendRoom] = useState<Room | null>(null);
   const [now, setNow] = useState(Date.now());
-  const [soundEnabled, setSoundEnabled] = useState(false);
+  const [soundReady, setSoundReady] = useState(false);
   const [isOnline, setIsOnline] = useState(() => navigator.onLine);
-  const warnedStayIds = useRef(new Set<number>());
-  const lastOverdueAlert = useRef(new Map<number, number>());
+  const audioContext = useRef<AudioContext | null>(null);
+  const lastStayAlert = useRef(new Map<number, number>());
 
   async function loadInventory(): Promise<void> {
     setError(null);
@@ -223,38 +244,98 @@ export default function App() {
   }, []);
 
   function playAlert(): void {
-    const AudioContextClass = window.AudioContext;
-    const context = new AudioContextClass();
-    const oscillator = context.createOscillator();
-    const gain = context.createGain();
-    oscillator.frequency.value = 740;
-    gain.gain.setValueAtTime(0.12, context.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, context.currentTime + 0.35);
-    oscillator.connect(gain).connect(context.destination);
-    oscillator.start();
-    oscillator.stop(context.currentTime + 0.35);
-    oscillator.addEventListener('ended', () => void context.close());
+    const context = audioContext.current;
+    if (!context || context.state === 'closed') return;
+
+    const playBuzzer = () => {
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+      oscillator.type = 'square';
+      gain.gain.setValueAtTime(0.38, context.currentTime);
+      gain.gain.setValueAtTime(
+        0.38,
+        context.currentTime + buzzerDurationSeconds - 0.1,
+      );
+      gain.gain.exponentialRampToValueAtTime(
+        0.001,
+        context.currentTime + buzzerDurationSeconds,
+      );
+      for (let step = 0; step < buzzerDurationSeconds * 4; step += 1) {
+        oscillator.frequency.setValueAtTime(
+          step % 2 === 0 ? 620 : 880,
+          context.currentTime + step * 0.25,
+        );
+      }
+      oscillator.connect(gain).connect(context.destination);
+      oscillator.start();
+      oscillator.stop(context.currentTime + buzzerDurationSeconds);
+    };
+
+    if (context.state === 'suspended') {
+      void context
+        .resume()
+        .then(playBuzzer)
+        .catch(() => {
+          setError('The buzzer could not play on this device.');
+        });
+    } else {
+      playBuzzer();
+    }
   }
 
   useEffect(() => {
-    if (!soundEnabled) return;
+    if (soundReady || user?.role === 'OWNER') return;
+
+    const armFrontDeskSound = () => {
+      try {
+        if (!audioContext.current || audioContext.current.state === 'closed') {
+          audioContext.current = new window.AudioContext();
+        }
+        void audioContext.current
+          .resume()
+          .then(() => setSoundReady(true))
+          .catch(() => {
+            if (user?.role === 'FRONT_DESK') {
+              setError('The front desk buzzer could not start on this device.');
+            }
+          });
+      } catch {
+        if (user?.role === 'FRONT_DESK') {
+          setError('The front desk buzzer could not start on this device.');
+        }
+      }
+    };
+
+    window.addEventListener('pointerdown', armFrontDeskSound, {
+      passive: true,
+    });
+    window.addEventListener('keydown', armFrontDeskSound);
+    return () => {
+      window.removeEventListener('pointerdown', armFrontDeskSound);
+      window.removeEventListener('keydown', armFrontDeskSound);
+    };
+  }, [soundReady, user?.role]);
+
+  useEffect(
+    () => () => {
+      if (audioContext.current?.state !== 'closed') {
+        void audioContext.current?.close();
+      }
+    },
+    [],
+  );
+
+  useEffect(() => {
+    if (!soundReady || user?.role !== 'FRONT_DESK') return;
     for (const room of rooms) {
       const stay = room.stays[0];
       if (!stay) continue;
       const occupancy = getOccupancyStatus(stay, now);
-      if (occupancy === 'DUE_SOON' && !warnedStayIds.current.has(stay.id)) {
-        warnedStayIds.current.add(stay.id);
+      if (claimStayAlert(stay.id, occupancy, now, lastStayAlert.current)) {
         playAlert();
       }
-      if (occupancy === 'OVERDUE') {
-        const lastAlert = lastOverdueAlert.current.get(stay.id) ?? 0;
-        if (now - lastAlert >= 60_000) {
-          lastOverdueAlert.current.set(stay.id, now);
-          playAlert();
-        }
-      }
     }
-  }, [now, rooms, soundEnabled]);
+  }, [now, rooms, soundReady, user?.role]);
 
   const visibleRooms = useMemo(
     () =>
@@ -272,6 +353,18 @@ export default function App() {
         );
       }),
     [filter, now, rooms],
+  );
+  const checkoutAlerts = useMemo(
+    () =>
+      rooms.flatMap((room) => {
+        const stay = room.stays[0];
+        if (!stay) return [];
+        const status = getOccupancyStatus(stay, now);
+        return status === 'DUE_SOON' || status === 'OVERDUE'
+          ? [{ room, stay, status }]
+          : [];
+      }),
+    [now, rooms],
   );
 
   async function checkOut(stay: Stay): Promise<void> {
@@ -373,16 +466,6 @@ export default function App() {
           </div>
         </div>
         <div className="header-actions">
-          <button
-            type="button"
-            className="sound-button"
-            onClick={() => {
-              if (!soundEnabled) playAlert();
-              setSoundEnabled((enabled) => !enabled);
-            }}
-          >
-            {soundEnabled ? 'Sound on' : 'Enable sound'}
-          </button>
           <div className={`connection ${isOnline ? '' : 'offline'}`}>
             <span aria-hidden="true" />
             {isOnline ? 'System Connected' : 'System Offline'}
@@ -440,6 +523,14 @@ export default function App() {
         >
           <CalendarDays size={20} />
           <span>Bookings</span>
+        </button>
+        <button
+          className={view === 'store' ? 'active' : ''}
+          onClick={() => selectView('store')}
+          title="Mini Store"
+        >
+          <ShoppingBasket size={20} />
+          <span>Mini Store</span>
         </button>
         {user.role === 'OWNER' && (
           <button
@@ -513,16 +604,52 @@ export default function App() {
                 <h2>Room inventory</h2>
                 <p>{rooms.length} rooms configured</p>
               </div>
-              {user.role === 'OWNER' && (
-                <button
-                  type="button"
-                  className="primary-button"
-                  onClick={() => setShowAddRoom(true)}
-                >
-                  + Add room
-                </button>
-              )}
+              <div className="page-heading-actions">
+                {user.role === 'OWNER' && (
+                  <button
+                    type="button"
+                    className="primary-button"
+                    onClick={() => setShowAddRoom(true)}
+                  >
+                    + Add room
+                  </button>
+                )}
+              </div>
             </div>
+
+            {checkoutAlerts.length > 0 && (
+              <section
+                className="checkout-alerts"
+                role="alert"
+                aria-live="assertive"
+              >
+                <div className="checkout-alerts-heading">
+                  <h3>Checkout alerts</h3>
+                  <span>{checkoutAlerts.length} active</span>
+                </div>
+                {checkoutAlerts.map(({ room, stay, status }) => (
+                  <article
+                    className={`checkout-alert ${status.toLowerCase()}`}
+                    key={stay.id}
+                  >
+                    <div>
+                      <strong>Room {room.number}</strong>
+                      <span>
+                        {status === 'OVERDUE' ? 'Overdue' : 'Checkout soon'} ·{' '}
+                        {formatRemaining(stay, now)}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      onClick={() => void checkOut(stay)}
+                    >
+                      Check out
+                    </button>
+                  </article>
+                ))}
+              </section>
+            )}
 
             <div className="filter-bar" aria-label="Filter rooms">
               {(
@@ -661,6 +788,8 @@ export default function App() {
           <HistoryView rooms={rooms} roomTypes={roomTypes} />
         ) : view === 'bookings' ? (
           <BookingsView rooms={rooms} onStayCreated={loadInventory} />
+        ) : view === 'store' ? (
+          <MiniStoreView isOwner={user.role === 'OWNER'} rooms={rooms} />
         ) : view === 'reports' ? (
           <ReportsView />
         ) : view === 'shifts' ? (
@@ -1120,37 +1249,48 @@ function HistoryView({
   roomTypes: RoomType[];
 }) {
   const [stays, setStays] = useState<HistoryStay[]>([]);
+  const [period, setPeriod] = useState<HistoryPeriod>('TODAY');
+  const [referenceDate] = useState(manilaOperationalDate);
   const [status, setStatus] = useState('ALL');
   const [arrival, setArrival] = useState('ALL');
-  const [from, setFrom] = useState('');
-  const [to, setTo] = useState('');
+  const [from, setFrom] = useState(manilaOperationalDate);
+  const [to, setTo] = useState(manilaOperationalDate);
   const [roomId, setRoomId] = useState('ALL');
   const [roomTypeId, setRoomTypeId] = useState('ALL');
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<string | null>(null);
 
   useEffect(() => {
+    let active = true;
     const parameters = new URLSearchParams();
     if (status !== 'ALL') parameters.set('status', status);
     if (arrival !== 'ALL') parameters.set('arrivalType', arrival);
-    if (from)
-      parameters.set('from', new Date(`${from}T00:00:00+08:00`).toISOString());
-    if (to)
-      parameters.set('to', new Date(`${to}T23:59:59.999+08:00`).toISOString());
+    const window = resolveHistoryWindow(period, referenceDate, from, to);
+    if (window.from) parameters.set('from', window.from);
+    if (window.to) parameters.set('to', window.to);
     if (roomId !== 'ALL') parameters.set('roomId', roomId);
     if (roomTypeId !== 'ALL') parameters.set('roomTypeId', roomTypeId);
     setLoading(true);
+    setMessage(null);
     apiRequest<ApiCollection<HistoryStay>>(`/stays/history?${parameters}`)
-      .then((response) => setStays(response.data))
-      .catch((error: unknown) =>
+      .then((response) => {
+        if (active) setStays(response.data);
+      })
+      .catch((error: unknown) => {
+        if (!active) return;
         setMessage(
           error instanceof Error
             ? error.message
             : 'History could not be loaded.',
-        ),
-      )
-      .finally(() => setLoading(false));
-  }, [arrival, from, roomId, roomTypeId, status, to]);
+        );
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [arrival, from, period, referenceDate, roomId, roomTypeId, status, to]);
 
   return (
     <>
@@ -1161,6 +1301,19 @@ function HistoryView({
         </div>
       </div>
       <div className="report-controls">
+        <label>
+          Period
+          <select
+            value={period}
+            onChange={(event) => setPeriod(event.target.value as HistoryPeriod)}
+          >
+            <option value="TODAY">Today</option>
+            <option value="WEEK">This week</option>
+            <option value="MONTH">This month</option>
+            <option value="ALL">All history</option>
+            <option value="CUSTOM">Custom dates</option>
+          </select>
+        </label>
         <label>
           Status
           <select
@@ -1184,23 +1337,27 @@ function HistoryView({
             <option value="WALK_IN">Walk-in</option>
           </select>
         </label>
-        <label>
-          From
-          <input
-            type="date"
-            value={from}
-            onChange={(event) => setFrom(event.target.value)}
-          />
-        </label>
-        <label>
-          To
-          <input
-            type="date"
-            value={to}
-            min={from || undefined}
-            onChange={(event) => setTo(event.target.value)}
-          />
-        </label>
+        {period === 'CUSTOM' && (
+          <>
+            <label>
+              From
+              <input
+                type="date"
+                value={from}
+                onChange={(event) => setFrom(event.target.value)}
+              />
+            </label>
+            <label>
+              To
+              <input
+                type="date"
+                value={to}
+                min={from || undefined}
+                onChange={(event) => setTo(event.target.value)}
+              />
+            </label>
+          </>
+        )}
         <label>
           Room type
           <select
@@ -1310,6 +1467,8 @@ type OwnerReportPreset =
   | 'month'
   | 'custom';
 type OwnerReportShift = 'ALL' | 'DAY' | 'NIGHT';
+type ReportCategory = 'OVERALL' | 'ROOMS' | 'STORE';
+type ReportPaymentMethod = 'ALL' | 'CASH' | 'GCASH';
 
 interface OwnerReportResponse {
   generatedAt: string;
@@ -1336,10 +1495,13 @@ interface OwnerReportResponse {
   financial: {
     grossRoomRevenueCentavos: number;
     extensionRevenueCentavos: number;
+    storeRevenueCentavos: number;
+    extraChargesRevenueCentavos: number;
     grossRevenueCentavos: number;
     netRevenueCentavos: number;
     totalCollectedCentavos: number;
   };
+  revenueTrend: RevenueTrendPoint[];
   packages: {
     durationHours: number;
     count: number;
@@ -1365,6 +1527,8 @@ interface OwnerReportResponse {
     roomNumber: string | null;
     stayId: number | null;
     bookingId: number | null;
+    storeSaleId: number | null;
+    productId: number | null;
     amountCentavos: number | null;
     previousValue: unknown;
     newValue: unknown;
@@ -1395,11 +1559,15 @@ function manilaOperationalDate(): string {
 }
 
 function ReportsView() {
+  const [reportCategory, setReportCategory] =
+    useState<ReportCategory>('OVERALL');
   const [date, setDate] = useState(manilaOperationalDate);
   const [from, setFrom] = useState(manilaOperationalDate);
   const [to, setTo] = useState(manilaOperationalDate);
   const [preset, setPreset] = useState<OwnerReportPreset>('today');
   const [shift, setShift] = useState<OwnerReportShift>('ALL');
+  const [paymentMethod, setPaymentMethod] =
+    useState<ReportPaymentMethod>('ALL');
   const [viewMode, setViewMode] = useState<'OVERALL' | 'BY_STAFF'>('OVERALL');
   const [staffId, setStaffId] = useState('');
   const [staff, setStaff] = useState<StaffRecord[]>([]);
@@ -1435,42 +1603,66 @@ function ReportsView() {
     if (viewMode === 'BY_STAFF' && staffId) {
       parameters.set('staffId', staffId);
     }
+    if (paymentMethod !== 'ALL') {
+      parameters.set('paymentMethod', paymentMethod);
+    }
     return parameters.toString();
-  }, [date, from, preset, shift, staffId, to, viewMode]);
+  }, [date, from, paymentMethod, preset, shift, staffId, to, viewMode]);
+  const ownerQuery = useMemo(() => {
+    const parameters = new URLSearchParams(query);
+    parameters.set('scope', reportCategory === 'ROOMS' ? 'ROOMS' : 'OVERALL');
+    return parameters.toString();
+  }, [query, reportCategory]);
 
   useEffect(() => {
+    if (reportCategory === 'STORE') {
+      setLoading(false);
+      setMessage(null);
+      return;
+    }
     if (viewMode === 'BY_STAFF' && !staffId) return;
+    let active = true;
     setLoading(true);
-    apiRequest<{ data: OwnerReportResponse }>(`/reports/owner?${query}`)
+    apiRequest<{ data: OwnerReportResponse }>(`/reports/owner?${ownerQuery}`)
       .then((response) => {
+        if (!active) return;
         setReport(response.data);
         setMessage(null);
       })
-      .catch((error: unknown) =>
+      .catch((error: unknown) => {
+        if (!active) return;
         setMessage(
           error instanceof Error
             ? error.message
             : 'Report could not be loaded.',
-        ),
-      )
-      .finally(() => setLoading(false));
-  }, [query, staffId, viewMode]);
+        );
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [ownerQuery, reportCategory, staffId, viewMode]);
 
   const download = (extension: 'pdf' | 'xlsx') => {
-    window.location.href = `${apiUrl}/reports/owner.${extension}?${query}`;
+    window.location.href =
+      reportCategory === 'STORE'
+        ? `${apiUrl}/reports/store/${extension}?${query}`
+        : `${apiUrl}/reports/owner.${extension}?${ownerQuery}`;
   };
 
   return (
     <section className="print-report">
       <div className="page-heading">
         <div>
-          <h2>Owner reports</h2>
+          <h2>Reports</h2>
           <p>
-            {report
-              ? `${report.filters.label} · ${
-                  report.selectedStaff?.username ?? 'Overall motel'
-                }`
-              : 'Operational and financial performance'}
+            {reportCategory === 'OVERALL'
+              ? 'Combined room and store performance'
+              : reportCategory === 'ROOMS'
+                ? 'Room operations and revenue'
+                : 'Store products and extra charges'}
           </p>
         </div>
         <div className="export-actions">
@@ -1486,6 +1678,19 @@ function ReportsView() {
         </div>
       </div>
       <div className="report-controls owner-report-controls">
+        <label>
+          Report type
+          <select
+            value={reportCategory}
+            onChange={(event) =>
+              setReportCategory(event.target.value as ReportCategory)
+            }
+          >
+            <option value="OVERALL">Overall</option>
+            <option value="ROOMS">Rooms</option>
+            <option value="STORE">Store</option>
+          </select>
+        </label>
         <label>
           Reporting period
           <select
@@ -1547,6 +1752,19 @@ function ReportsView() {
             <option value="NIGHT">Night shift</option>
           </select>
         </label>
+        <label>
+          Payment method
+          <select
+            value={paymentMethod}
+            onChange={(event) =>
+              setPaymentMethod(event.target.value as ReportPaymentMethod)
+            }
+          >
+            <option value="ALL">All payments</option>
+            <option value="CASH">Cash</option>
+            <option value="GCASH">GCash</option>
+          </select>
+        </label>
         <fieldset className="period-control report-view-control">
           <legend>View</legend>
           <div>
@@ -1584,23 +1802,45 @@ function ReportsView() {
         )}
       </div>
       {message && <p className="form-error">{message}</p>}
-      {loading || !report ? (
+      {reportCategory === 'STORE' ? (
+        <StoreReportView embeddedQuery={query} />
+      ) : loading || !report ? (
         <p className="empty-state">Loading report...</p>
       ) : (
         <>
           <div className="metric-grid owner-metric-grid">
             <div>
-              <span>Gross revenue</span>
+              <span>
+                {reportCategory === 'OVERALL'
+                  ? 'Total revenue'
+                  : 'Room revenue'}
+              </span>
               <strong>
                 {formatMoney(report.financial.grossRevenueCentavos)}
               </strong>
             </div>
-            <div>
-              <span>Net revenue</span>
-              <strong>
-                {formatMoney(report.financial.netRevenueCentavos)}
-              </strong>
-            </div>
+            {reportCategory === 'OVERALL' && (
+              <>
+                <div>
+                  <span>Room revenue</span>
+                  <strong>
+                    {formatMoney(
+                      report.financial.grossRoomRevenueCentavos +
+                        report.financial.extensionRevenueCentavos,
+                    )}
+                  </strong>
+                </div>
+                <div>
+                  <span>Store and extra charges</span>
+                  <strong>
+                    {formatMoney(
+                      report.financial.storeRevenueCentavos +
+                        report.financial.extraChargesRevenueCentavos,
+                    )}
+                  </strong>
+                </div>
+              </>
+            )}
             <div>
               <span>Check-ins</span>
               <strong>{report.summary.totalCheckIns}</strong>
@@ -1627,6 +1867,54 @@ function ReportsView() {
             </div>
           </div>
 
+          <Suspense fallback={<div className="revenue-chart-loading" />}>
+            <RevenueCharts
+              trend={report.revenueTrend}
+              breakdown={
+                reportCategory === 'ROOMS'
+                  ? [
+                      {
+                        name: 'Rooms',
+                        amountCentavos:
+                          report.financial.grossRoomRevenueCentavos,
+                        color: '#1c1c1c',
+                      },
+                      {
+                        name: 'Extensions',
+                        amountCentavos:
+                          report.financial.extensionRevenueCentavos,
+                        color: '#707070',
+                      },
+                    ]
+                  : [
+                      {
+                        name: 'Rooms',
+                        amountCentavos:
+                          report.financial.grossRoomRevenueCentavos,
+                        color: '#1c1c1c',
+                      },
+                      {
+                        name: 'Extensions',
+                        amountCentavos:
+                          report.financial.extensionRevenueCentavos,
+                        color: '#707070',
+                      },
+                      {
+                        name: 'Store',
+                        amountCentavos: report.financial.storeRevenueCentavos,
+                        color: '#18823b',
+                      },
+                      {
+                        name: 'Extras',
+                        amountCentavos:
+                          report.financial.extraChargesRevenueCentavos,
+                        color: '#a05a2c',
+                      },
+                    ]
+              }
+            />
+          </Suspense>
+
           <div className="report-breakdown-grid">
             <section>
               <h3>Financial breakdown</h3>
@@ -1645,6 +1933,24 @@ function ReportsView() {
                         {formatMoney(report.financial.extensionRevenueCentavos)}
                       </td>
                     </tr>
+                    {reportCategory === 'OVERALL' && (
+                      <>
+                        <tr>
+                          <th>Store revenue</th>
+                          <td>
+                            {formatMoney(report.financial.storeRevenueCentavos)}
+                          </td>
+                        </tr>
+                        <tr>
+                          <th>Extra charges</th>
+                          <td>
+                            {formatMoney(
+                              report.financial.extraChargesRevenueCentavos,
+                            )}
+                          </td>
+                        </tr>
+                      </>
+                    )}
                     <tr>
                       <th>Total collected</th>
                       <td>
@@ -1796,6 +2102,7 @@ function ReportsView() {
                     <th>Room</th>
                     <th>Stay</th>
                     <th>Booking</th>
+                    <th>Store sale</th>
                     <th>Amount / Change</th>
                   </tr>
                 </thead>
@@ -1808,6 +2115,7 @@ function ReportsView() {
                       <td>{item.roomNumber ?? '—'}</td>
                       <td>{item.stayId ? `#${item.stayId}` : '—'}</td>
                       <td>{item.bookingId ? `#${item.bookingId}` : '—'}</td>
+                      <td>{item.storeSaleId ? `#${item.storeSaleId}` : '—'}</td>
                       <td>
                         {item.amountCentavos !== null
                           ? formatMoney(item.amountCentavos)

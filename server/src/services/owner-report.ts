@@ -11,6 +11,7 @@ import {
   getOperationalDay,
   getShiftWindow,
 } from './shift-time.js';
+import { buildRevenueTrend } from './revenue-trend.js';
 
 export type OwnerReportPreset =
   | 'current_shift'
@@ -21,10 +22,13 @@ export type OwnerReportPreset =
   | 'month'
   | 'custom';
 export type OwnerReportShift = 'ALL' | 'DAY' | 'NIGHT';
+export type OwnerReportScope = 'OVERALL' | 'ROOMS';
 
 export interface OwnerReportOptions {
   preset: OwnerReportPreset;
   shift: OwnerReportShift;
+  scope?: OwnerReportScope | undefined;
+  paymentMethod?: PaymentMethod | undefined;
   date?: string | undefined;
   from?: string | undefined;
   to?: string | undefined;
@@ -84,16 +88,16 @@ const extensionSelect = {
   stay: { select: { room: { select: { number: true } } } },
 } satisfies Prisma.StayExtensionSelect;
 
-function mondayWindow(date: string): ReportWindow {
+function weekWindow(date: string): ReportWindow {
   const selected = getOperationalDay(date);
-  const weekday = selected.startsAt.getUTCDay() || 7;
+  const weekday = selected.startsAt.getUTCDay();
   const startsAt = new Date(
-    selected.startsAt.getTime() - (weekday - 1) * 24 * 60 * 60 * 1000,
+    selected.startsAt.getTime() - weekday * 24 * 60 * 60 * 1000,
   );
   return {
     startsAt,
     endsAt: new Date(startsAt.getTime() + 7 * 24 * 60 * 60 * 1000),
-    label: `Week of ${date}`,
+    label: `Week of ${startsAt.toISOString().slice(0, 10)}`,
   };
 }
 
@@ -130,7 +134,7 @@ export function resolveOwnerReportWindow(
   }
 
   const referenceDate = options.date ?? currentOperationalDate(now);
-  if (options.preset === 'week') return mondayWindow(referenceDate);
+  if (options.preset === 'week') return weekWindow(referenceDate);
   if (options.preset === 'month') return monthWindow(referenceDate);
   if (options.preset === 'custom') {
     if (!options.from || !options.to) {
@@ -164,7 +168,7 @@ function isInWindow(timestamp: Date | null, window: ReportWindow): boolean {
   );
 }
 
-function isInShift(timestamp: Date, shift: OwnerReportShift): boolean {
+export function isInShift(timestamp: Date, shift: OwnerReportShift): boolean {
   return shift === 'ALL' || getShiftWindow(timestamp).type === shift;
 }
 
@@ -243,7 +247,13 @@ export async function buildOwnerReport(
   const selectedTransactions = transactions.filter(
     (transaction) =>
       isInShift(transaction.createdAt, options.shift) &&
-      (!options.staffId || transaction.handledById === options.staffId),
+      (!options.staffId || transaction.handledById === options.staffId) &&
+      (!options.paymentMethod ||
+        transaction.paymentMethod === options.paymentMethod) &&
+      (options.scope !== 'ROOMS' ||
+        transaction.transactionType === FinancialTransactionType.ROOM_CHARGE ||
+        transaction.transactionType ===
+          FinancialTransactionType.EXTENSION_CHARGE),
   );
   const selectedExtensions = extensions.filter(
     (extension) =>
@@ -253,7 +263,9 @@ export async function buildOwnerReport(
   const selectedAuditLogs = auditLogs.filter(
     (log) =>
       isInShift(log.createdAt, options.shift) &&
-      (!options.staffId || log.staffId === options.staffId),
+      (!options.staffId || log.staffId === options.staffId) &&
+      (options.scope !== 'ROOMS' ||
+        (log.entityType !== 'STORE_SALE' && log.entityType !== 'PRODUCT')),
   );
 
   const activityStayIds = selectedAuditLogs
@@ -291,6 +303,12 @@ export async function buildOwnerReport(
   const extensionTransactions = selectedTransactions.filter(
     (item) =>
       item.transactionType === FinancialTransactionType.EXTENSION_CHARGE,
+  );
+  const storeTransactions = selectedTransactions.filter(
+    (item) => item.transactionType === FinancialTransactionType.STORE_SALE,
+  );
+  const extraChargeTransactions = selectedTransactions.filter(
+    (item) => item.transactionType === FinancialTransactionType.EXTRA_CHARGE,
   );
   const sum = (items: typeof selectedTransactions) =>
     items.reduce((total, item) => total + item.amountCentavos, 0);
@@ -342,7 +360,10 @@ export async function buildOwnerReport(
     usageMap.set(stay.roomId, item);
   }
 
-  const paymentMethods = Object.values(PaymentMethod).map((method) => ({
+  const reportPaymentMethods = options.paymentMethod
+    ? [options.paymentMethod]
+    : Object.values(PaymentMethod);
+  const paymentMethods = reportPaymentMethods.map((method) => ({
     method,
     count: selectedTransactions.filter((item) => item.paymentMethod === method)
       .length,
@@ -356,8 +377,15 @@ export async function buildOwnerReport(
   }));
   const grossRoomRevenueCentavos = sum(roomChargeTransactions);
   const extensionRevenueCentavos = sum(extensionTransactions);
-  const grossRevenueCentavos =
-    grossRoomRevenueCentavos + extensionRevenueCentavos;
+  const storeRevenueCentavos = sum(storeTransactions);
+  const extraChargesRevenueCentavos = sum(extraChargeTransactions);
+  const grossRevenueCentavos = sum(selectedTransactions);
+  const revenueTrend = buildRevenueTrend(
+    selectedTransactions,
+    window.startsAt,
+    window.endsAt,
+    ['week', 'month', 'custom'].includes(options.preset) ? 'DAY' : 'HOUR',
+  );
 
   return {
     generatedAt: now,
@@ -366,6 +394,8 @@ export async function buildOwnerReport(
     filters: {
       preset: options.preset,
       shift: options.shift,
+      scope: options.scope ?? ('OVERALL' as const),
+      paymentMethod: options.paymentMethod ?? ('ALL' as const),
       startsAt: window.startsAt,
       endsAt: window.endsAt,
       label: window.label,
@@ -395,10 +425,13 @@ export async function buildOwnerReport(
     financial: {
       grossRoomRevenueCentavos,
       extensionRevenueCentavos,
+      storeRevenueCentavos,
+      extraChargesRevenueCentavos,
       grossRevenueCentavos,
       netRevenueCentavos: grossRevenueCentavos,
       totalCollectedCentavos: grossRevenueCentavos,
     },
+    revenueTrend,
     packages: [...packageMap.values()].sort(
       (left, right) => left.durationHours - right.durationHours,
     ),
@@ -426,6 +459,8 @@ export async function buildOwnerReport(
         roomNumber: activityRoomNumber ?? null,
         stayId: log.entityType === 'STAY' ? entityId : null,
         bookingId: log.entityType === 'BOOKING' ? entityId : null,
+        storeSaleId: log.entityType === 'STORE_SALE' ? entityId : null,
+        productId: log.entityType === 'PRODUCT' ? entityId : null,
         amountCentavos: numberDetail(details, 'amountCentavos'),
         previousValue: details.previousValue ?? null,
         newValue: details.newValue ?? details.operationalStatus ?? null,

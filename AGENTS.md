@@ -2,7 +2,7 @@
 
 ## Scope
 
-This repository contains the foundation and operational workflows through Milestone 9, including staff authentication, audit history, Cash/GCash room charges, stay extensions, Owner reporting, bookings, cleaning status, vehicle categories, operational hardening, PWA installation, deployment guidance, and tested backup/restore procedures. Do not add refunds, discounts, adjustments, expenses, other income, overdue charges, or `ADMIN` until a milestone explicitly requires them.
+This repository contains the foundation and operational workflows through the Mini Store milestone, including staff authentication, audit history, Cash/GCash room and store charges, stay extensions, Owner reporting, bookings, cleaning status, vehicle categories, operational hardening, PWA installation, deployment guidance, and tested backup/restore procedures. Mini Store products and configurable extra charges are approved revenue categories. Do not add refunds, discounts, adjustments, expenses, unrelated other income, overdue charges, inventory stock tracking, profit calculations, or `ADMIN` until a milestone explicitly requires them.
 
 ## Target Platform
 

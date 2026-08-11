@@ -7,7 +7,8 @@ The application uses MySQL through Prisma. Amounts are stored as integer centavo
 - `RoomType`, `Room`, and `StayRate`: room inventory and current prices
 - `Stay` and `StayExtension`: occupancy and extensions
 - `Booking`: reservations and their conversion link to a stay
-- `FinancialTransaction`: authoritative room and extension payments
+- `Product`, `StoreSale`, and `StoreSaleItem`: current catalog and immutable sale snapshots
+- `FinancialTransaction`: authoritative room, extension, store, and extra-charge payments
 - `StaffAccount` and `Session`: accounts and login sessions
 - `AuditLog`: staff actions
 - `Shift`: automatic Day and Night shift windows
@@ -27,6 +28,14 @@ A booking may have a room and may later have one converted stay. It permanently 
 ## Cleaning
 
 Room operational status includes Active, Cleaning, Maintenance, and Inactive. Checkout clears `activeRoomId` and changes the room to Cleaning in the same transaction. Staff must explicitly change Cleaning to Active before the next stay.
+
+## Mini Store and Extra Charges
+
+`Product` contains the current Owner-managed name, category, selling price, optional image path or URL, and active status. Products are deactivated instead of deleted so old relations remain intact.
+
+Each purchase creates one `StoreSale`, one or more `StoreSaleItem` records, and one matching `FinancialTransaction` in a single database transaction. The sale has a unique UUID idempotency key so retrying the same request cannot create another charge. A sale may optionally reference an active stay; the room is reached through that stay and is not duplicated on the sale.
+
+Each item copies the product name, category, unit price, quantity, and line total used at purchase time. These snapshots and the ledger amount remain unchanged when the Owner later edits the product. Uploaded product images are stored in the configured filesystem directory and only their paths are stored in MySQL. Image binary data is never stored in MySQL.
 
 ## Local Inspection
 

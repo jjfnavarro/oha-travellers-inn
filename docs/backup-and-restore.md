@@ -10,9 +10,15 @@ Start Docker Desktop and run this from the project root:
 .\scripts\backup-database.ps1
 ```
 
-The script uses the credentials already inside the MySQL container. It does not place a password in the command or backup documentation. It saves a timestamped SQL file under `backups\` and prints its size and SHA-256 hash.
+The script uses the credentials already inside the MySQL container. It does not place a password in the command or backup documentation. It saves a timestamped SQL file under `backups\` and prints its size and SHA-256 hash. When uploaded product images exist in the default `server\uploads\products` directory, it also creates a matching `oha-product-images-*.zip` archive.
 
-`backups\` is ignored by Git. Never commit database backups because they may contain guest and staff information.
+If production uses a custom `PRODUCT_IMAGE_DIR`, pass the same path to the scheduled backup command:
+
+```powershell
+.\scripts\backup-database.ps1 -ProductImageDirectory D:\OHAData\product-images
+```
+
+`backups\` is ignored by Git. Never commit database or product-image backups because they may contain private operational information.
 
 ## Storage and Retention
 
@@ -43,6 +49,8 @@ Verify:
 3. Staff, stays, bookings, and financial counts are plausible.
 4. Point a temporary test `DATABASE_URL` at the restore database and open the app.
 5. Confirm rooms, active stays, history, bookings, and Owner totals.
+
+The isolated database restore does not copy product images. Verify the matching image ZIP separately, and during a real disaster recovery extract its files into the configured `PRODUCT_IMAGE_DIR` before starting the application. Keep the SQL and image ZIP from the same timestamp together.
 
 Delete the test database only after verification is complete. Never change the normal application `DATABASE_URL` to the restore database without recording that change.
 

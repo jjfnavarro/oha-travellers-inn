@@ -1,5 +1,6 @@
 param(
-  [string]$OutputDirectory = "$(Split-Path -Parent $PSScriptRoot)\backups"
+  [string]$OutputDirectory = "$(Split-Path -Parent $PSScriptRoot)\backups",
+  [string]$ProductImageDirectory = "$(Split-Path -Parent $PSScriptRoot)\server\uploads\products"
 )
 
 $ErrorActionPreference = 'Stop'
@@ -30,9 +31,20 @@ try {
     throw 'The backup file is empty.'
   }
   $hash = Get-FileHash -Algorithm SHA256 -LiteralPath $outputPath
+  $imageBackupPath = $null
+  $resolvedImageDirectory = [System.IO.Path]::GetFullPath($ProductImageDirectory)
+  if (Test-Path -LiteralPath $resolvedImageDirectory) {
+    $imageFiles = @(Get-ChildItem -LiteralPath $resolvedImageDirectory -File)
+    if ($imageFiles.Count -gt 0) {
+      $imageBackupPath = Join-Path $resolvedOutput "oha-product-images-$timestamp.zip"
+      Compress-Archive -LiteralPath $imageFiles.FullName -DestinationPath $imageBackupPath
+    }
+  }
+  $productImagesResult = if ($imageBackupPath) { $imageBackupPath } else { 'No uploaded product images to back up' }
 
   [pscustomobject]@{
     Backup = $outputPath
+    ProductImages = $productImagesResult
     Bytes = (Get-Item -LiteralPath $outputPath).Length
     SHA256 = $hash.Hash
   }

@@ -14,6 +14,20 @@ const environment: Environment = {
 };
 
 describe('authentication hardening', () => {
+  test('returns a client error for malformed JSON', async () => {
+    const response = await request(
+      createApp(environment, vi.fn().mockResolvedValue(undefined)),
+    )
+      .post('/api/auth/login')
+      .set('Content-Type', 'application/json')
+      .send('{invalid');
+
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({
+      message: 'Request body must contain valid JSON.',
+    });
+  });
+
   test('temporarily limits repeated failed login attempts', async () => {
     const prisma = {
       staffAccount: { findUnique: vi.fn().mockResolvedValue(null) },

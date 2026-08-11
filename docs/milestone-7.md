@@ -8,7 +8,7 @@ Milestone 7 provides Owner-only operational and financial reporting calculated b
 - Current shift, previous shift, today, specific date, week, month, and custom-range periods
 - Day, Night, and All shifts
 - Check-in, checkout, room-use, unique-room, package, extension, arrival, and overdue statistics
-- Room-charge, extension, gross, net, collected, and Cash/GCash totals from `FinancialTransaction`
+- Room-charge, extension, store, extra-charge, gross, net, collected, and Cash/GCash totals from `FinancialTransaction`
 - Room usage, package, payment-method, and detailed activity breakdowns
 - Matching screen, PDF, and Excel calculations
 - Backend Owner authorization
@@ -60,6 +60,8 @@ Financial totals will be calculated from immutable financial transactions and in
 - Gross room revenue
 - Revenue by 3, 6, 12, and 24-hour package
 - Extension revenue
+- Mini Store product revenue
+- Extra-charge revenue
 - Discounts
 - Adjustments
 - Refunds when supported
@@ -78,6 +80,7 @@ The staff report will include a chronological activity log. Entries should show,
 - Room number
 - Stay ID
 - Booking ID
+- Store sale ID
 - Financial amount
 - Previous and new values
 
