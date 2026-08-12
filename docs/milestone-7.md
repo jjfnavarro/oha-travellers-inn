@@ -60,7 +60,7 @@ Financial totals will be calculated from immutable financial transactions and in
 - Gross room revenue
 - Revenue by 3, 6, 12, and 24-hour package
 - Extension revenue
-- Mini Store product revenue
+- Store product revenue
 - Extra-charge revenue
 - Discounts
 - Adjustments

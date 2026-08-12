@@ -67,6 +67,11 @@ test('recovers from a failed report request when Retry is selected', async () =>
   render(<StoreReportView />);
 
   expect(
+    screen.getByRole('heading', { name: 'Store reports' }),
+  ).toBeInTheDocument();
+  expect(screen.queryByText('Mini Store reports')).not.toBeInTheDocument();
+
+  expect(
     await screen.findByText('Store report unavailable.'),
   ).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Retry' }));

@@ -66,7 +66,7 @@ function database(
       findUniqueOrThrow: vi.fn().mockResolvedValue(complete),
     },
     product: { findUnique: vi.fn().mockResolvedValue(product) },
-    stay: { findFirst: vi.fn() },
+    stay: { findFirst: vi.fn().mockResolvedValue({ id: 10 }) },
     financialTransaction: {
       create: failFinancial
         ? vi.fn().mockRejectedValue(new Error('write failed'))
@@ -90,15 +90,17 @@ describe('store purchases', () => {
       ProductCategory.STORE_PRODUCT,
       PaymentMethod.CASH,
       FinancialTransactionType.STORE_SALE,
+      null,
     ],
     [
       ProductCategory.EXTRA_CHARGE,
       PaymentMethod.GCASH,
       FinancialTransactionType.EXTRA_CHARGE,
+      10,
     ],
   ])(
     'calculates quantity and creates a %s ledger transaction',
-    async (category, paymentMethod, transactionType) => {
+    async (category, paymentMethod, transactionType, stayId) => {
       const { prisma, transaction } = database(category);
       const response = await request(createApp(environment, vi.fn(), prisma))
         .post('/api/store-sales')
@@ -107,16 +109,20 @@ describe('store purchases', () => {
           productId: 7,
           quantity: 2,
           paymentMethod,
-          stayId: null,
+          stayId,
           idempotencyKey: key,
         });
       expect(response.status).toBe(201);
       expect(transaction.storeSale.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
+          handledByUserId: 2,
+          stayId,
+          paymentMethod,
           totalAmountCentavos: 5_000,
           items: {
             create: expect.objectContaining({
               productNameSnapshot: expect.any(String),
+              categorySnapshot: category,
               unitPriceCentavos: 2_500,
               quantity: 2,
               lineTotalCentavos: 5_000,
@@ -126,6 +132,8 @@ describe('store purchases', () => {
       });
       expect(transaction.financialTransaction.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
+          storeSaleId: 9,
+          handledById: 2,
           transactionType,
           amountCentavos: 5_000,
           paymentMethod,
@@ -134,6 +142,54 @@ describe('store purchases', () => {
       expect(transaction.auditLog.create).toHaveBeenCalledOnce();
     },
   );
+
+  test('rejects an extra charge without a stay', async () => {
+    const { prisma, transaction } = database(ProductCategory.EXTRA_CHARGE);
+    const response = await request(createApp(environment, vi.fn(), prisma))
+      .post('/api/store-sales')
+      .set('Cookie', 'oha_session=test')
+      .send({
+        productId: 7,
+        quantity: 1,
+        paymentMethod: 'CASH',
+        stayId: null,
+        idempotencyKey: key,
+      });
+    expect(response.status).toBe(400);
+    expect(response.body.message).toBe(
+      'Select an occupied room for this extra charge.',
+    );
+    expect(transaction.stay.findFirst).not.toHaveBeenCalled();
+    expect(transaction.storeSale.create).not.toHaveBeenCalled();
+  });
+
+  test('rejects an extra charge when the selected stay is no longer active', async () => {
+    const { prisma, transaction } = database(ProductCategory.EXTRA_CHARGE);
+    transaction.stay.findFirst.mockResolvedValue(null);
+    const response = await request(createApp(environment, vi.fn(), prisma))
+      .post('/api/store-sales')
+      .set('Cookie', 'oha_session=test')
+      .send({
+        productId: 7,
+        quantity: 1,
+        paymentMethod: 'GCASH',
+        stayId: 10,
+        idempotencyKey: key,
+      });
+    expect(response.status).toBe(409);
+    expect(response.body.message).toBe(
+      'The selected room no longer has an active stay.',
+    );
+    expect(transaction.stay.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: 10,
+        status: 'ACTIVE',
+        activeRoomId: { not: null },
+      },
+      select: { id: true },
+    });
+    expect(transaction.storeSale.create).not.toHaveBeenCalled();
+  });
 
   test('rejects an inactive product before creating a sale', async () => {
     const { prisma, transaction } = database();

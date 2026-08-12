@@ -36,7 +36,7 @@ The local API and database portion passed on August 8, 2026. Installation, stand
 20. Repeat Owner dashboard and report navigation on a supported mobile phone in portrait and landscape.
 21. Confirm the sidebar opens and closes without covering inaccessible controls and each report filter and revenue chart can be reached without page-level horizontal scrolling.
 22. Confirm metric values, product names, activity entries, and export controls wrap cleanly and remain readable at narrow widths.
-23. Open Mini Store product management and confirm product forms, price inputs, image previews, and action buttons fit the viewport and have comfortable touch targets.
+23. Open Store product management and confirm product forms, price inputs, image previews, and action buttons fit the viewport and have comfortable touch targets.
 
 ## Recovery and Network Safety
 

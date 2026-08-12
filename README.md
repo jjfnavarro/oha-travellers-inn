@@ -14,7 +14,7 @@ The completed work is documented in `docs/milestone-1.md` through `docs/mileston
 - Milestone 8.5 adds checkout-to-cleaning, optional vehicle categories, concurrent check-in verification, reconnect recovery, offline write protection, login throttling, safe production errors, and atomic rate auditing.
 - Milestone 9 adds installable PWA metadata and icons, a network-required service worker, deployment and HTTPS guidance, and tested MySQL backup/restore scripts.
 - Milestone 10 acceptance is in progress. The isolated database-backed workflow, permissions, financial reconciliation, report exports, and restore reset have passed; physical Android tablet and full Day/Night operating-day sign-off remain.
-- The Mini Store milestone adds configurable store products and extra charges, optional active-room linking, Cash/GCash purchases, immutable historical prices, staff attribution, and Owner store reporting.
+- The Store milestone adds configurable store products and extra charges, active-stay linking for extra charges, optional linking for regular products, Cash/GCash purchases, immutable historical prices, staff attribution, and Owner store reporting.
 
 Milestone 7 reports calculate money from immutable financial transactions and enforce Owner access on the backend. Booking actions appear in audit and Owner activity history, but bookings create no revenue until converted into a stay. Discounts, adjustments, refunds, vehicle subtypes, and the `ADMIN` role remain deferred.
 
@@ -150,7 +150,7 @@ The primary front-desk device is an Android tablet running Google Chrome. Open t
 
 The Bookings view lets Owner and Front Desk accounts select a date, create or edit a booking, assign a room optionally, confirm, cancel, mark no-show, and convert an arrival into a paid stay. Room overlap validation is enforced by the backend. See `docs/booking-workflow.md` for the operating rules.
 
-The Mini Store view lets both roles sell active products and extra charges without typing product names. The Owner manages catalog prices, images, categories, and availability. Store, Rooms, and Overall reporting are selected within the Reports view. See `docs/mini-store.md`.
+The Store view lets both roles sell active products and extra charges without typing product names. Extra charges require an occupied room, while regular products may be sold without a stay. The Owner manages catalog prices, images, categories, and availability. Store, Rooms, and Overall reporting are selected within the Reports view. See `docs/mini-store.md`.
 
 Stay History provides date, room, room-type, status, and arrival filters. Reports use the motel's 8:00 AM operational-day boundary and support browser printing, PDF downloads, and Excel downloads. Day and Night shift records are assigned automatically using `Asia/Manila`.
 

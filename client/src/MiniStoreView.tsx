@@ -99,7 +99,7 @@ export function MiniStoreView({ isOwner, rooms }: MiniStoreViewProps) {
     <>
       <div className="page-heading store-page-heading">
         <div>
-          <h2>Mini Store</h2>
+          <h2>Store</h2>
           <p>Store products and motel extra charges</p>
         </div>
         {isOwner && (
@@ -291,8 +291,13 @@ function PurchaseDialog({
   const [message, setMessage] = useState<string | null>(null);
   const [idempotencyKey] = useState(() => crypto.randomUUID());
   const total = product.sellingPriceCentavos * quantity;
+  const requiresStay = product.category === 'EXTRA_CHARGE';
 
   async function purchase(): Promise<void> {
+    if (requiresStay && !stayId) {
+      setMessage('Select an occupied room for this extra charge.');
+      return;
+    }
     setSubmitting(true);
     setMessage(null);
     try {
@@ -370,12 +375,19 @@ function PurchaseDialog({
           </span>
         </label>
         <label>
-          Link to active room (optional)
+          {requiresStay
+            ? 'Occupied room (required)'
+            : 'Link to active room (optional)'}
           <select
             value={stayId}
             onChange={(event) => setStayId(event.target.value)}
+            aria-required={requiresStay}
           >
-            <option value="">Standalone front-desk purchase</option>
+            <option value="">
+              {requiresStay
+                ? 'Select an occupied room'
+                : 'Standalone front-desk purchase'}
+            </option>
             {rooms.map((room) => (
               <option key={room.id} value={room.stays[0]!.id}>
                 Room {room.number}
@@ -407,7 +419,10 @@ function PurchaseDialog({
           <strong>{money(total)}</strong>
         </div>
         {message && (
-          <p className="form-error" role="alert">
+          <p
+            className={`form-error ${message === 'Select an occupied room for this extra charge.' ? 'extra-charge-warning' : ''}`}
+            role="alert"
+          >
             {message}
           </p>
         )}

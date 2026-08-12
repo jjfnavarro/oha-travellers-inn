@@ -1,6 +1,6 @@
-# Mini Store and Extra Charges
+# Store and Extra Charges
 
-The Mini Store records paid store products and motel extra charges without adding inventory, cost, profit, discounts, refunds, or payment adjustments.
+The Store records paid store products and motel extra charges without adding inventory, cost, profit, discounts, refunds, or payment adjustments.
 
 ## Permissions
 
@@ -10,7 +10,7 @@ The Mini Store records paid store products and motel extra charges without addin
 
 ## Purchase Flow
 
-Staff selects one active product, sets a quantity, optionally links an active room stay, selects Cash or GCash, and confirms payment. The server reloads the active product and calculates the authoritative total from its current selling price. The sale, item snapshot, financial transaction, and audit record are committed together.
+Staff selects one active product, sets a quantity, selects Cash or GCash, and confirms payment. Regular products may optionally link to an active stay. Extra charges require an active stay for an occupied room. The server reloads the active product and stay and calculates the authoritative total from its current selling price. The sale, item snapshot, financial transaction, and audit record are committed together.
 
 Each purchase request carries a UUID idempotency key. Repeating the same request returns the original sale instead of charging twice. Failed or offline requests are never queued as successful transactions.
 

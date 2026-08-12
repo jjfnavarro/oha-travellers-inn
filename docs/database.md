@@ -29,7 +29,7 @@ A booking may have a room and may later have one converted stay. It permanently 
 
 Room operational status includes Active, Cleaning, Maintenance, and Inactive. Checkout clears `activeRoomId` and changes the room to Cleaning in the same transaction. Staff must explicitly change Cleaning to Active before the next stay.
 
-## Mini Store and Extra Charges
+## Store and Extra Charges
 
 `Product` contains the current Owner-managed name, category, selling price, optional image path or URL, and active status. Products are deactivated instead of deleted so old relations remain intact.
 

@@ -57,10 +57,7 @@ async function pdf(report: StoreReport): Promise<Buffer> {
     document.on('error', reject);
   });
   document.fontSize(18).text("OHA Traveller's Inn", { align: 'center' });
-  document
-    .fontSize(13)
-    .text('Mini Store Report', { align: 'center' })
-    .moveDown();
+  document.fontSize(13).text('Store Report', { align: 'center' }).moveDown();
   document.fontSize(10).text(`Period: ${report.filters.label}`);
   document.text(`Shift: ${report.filters.shift}`);
   document.text(`Payment: ${report.filters.paymentMethod}`);
@@ -108,7 +105,7 @@ async function workbook(report: StoreReport): Promise<Buffer> {
   const data: SheetData = [
     [
       {
-        value: "OHA Traveller's Inn Mini Store Report",
+        value: "OHA Traveller's Inn Store Report",
         fontWeight: 'bold',
         fontSize: 16,
       },
@@ -197,7 +194,7 @@ export function createStoreReportsRouter(prisma: PrismaClient): Router {
       response.type('application/pdf');
       response.setHeader(
         'Content-Disposition',
-        'attachment; filename="oha-mini-store-report.pdf"',
+        'attachment; filename="oha-store-report.pdf"',
       );
       response.send(await pdf(report));
     } catch (error: unknown) {
@@ -215,7 +212,7 @@ export function createStoreReportsRouter(prisma: PrismaClient): Router {
       );
       response.setHeader(
         'Content-Disposition',
-        'attachment; filename="oha-mini-store-report.xlsx"',
+        'attachment; filename="oha-store-report.xlsx"',
       );
       response.send(await workbook(report));
     } catch (error: unknown) {

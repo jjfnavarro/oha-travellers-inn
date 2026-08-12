@@ -191,7 +191,7 @@ export function StoreReportView({
       {embeddedQuery === undefined && (
         <div className="page-heading">
           <div>
-            <h2>Mini Store reports</h2>
+            <h2>Store reports</h2>
             <p>
               {report
                 ? `${report.filters.label} · ${report.selectedStaff?.username ?? 'All staff'}`

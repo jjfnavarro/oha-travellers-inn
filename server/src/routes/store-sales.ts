@@ -58,9 +58,23 @@ export function createStoreSalesRouter(prisma: PrismaClient): Router {
             );
           }
 
+          if (
+            product.category === ProductCategory.EXTRA_CHARGE &&
+            !body.data.stayId
+          ) {
+            throw new StoreSaleRuleError(
+              'Select an occupied room for this extra charge.',
+              400,
+            );
+          }
+
           if (body.data.stayId) {
             const stay = await transaction.stay.findFirst({
-              where: { id: body.data.stayId, status: StayStatus.ACTIVE },
+              where: {
+                id: body.data.stayId,
+                status: StayStatus.ACTIVE,
+                activeRoomId: { not: null },
+              },
               select: { id: true },
             });
             if (!stay) {

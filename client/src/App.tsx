@@ -111,6 +111,21 @@ interface HistoryStay extends Stay {
   shift: { type: 'DAY' | 'NIGHT' } | null;
   checkedInBy: { id: number; username: string } | null;
   checkedOutBy: { id: number; username: string } | null;
+  storeSales: {
+    id: number;
+    paymentMethod: 'CASH' | 'GCASH';
+    totalAmountCentavos: number;
+    createdAt: string;
+    handledBy: { id: number; username: string };
+    items: {
+      id: number;
+      productNameSnapshot: string;
+      categorySnapshot: 'STORE_PRODUCT' | 'EXTRA_CHARGE';
+      unitPriceCentavos: number;
+      quantity: number;
+      lineTotalCentavos: number;
+    }[];
+  }[];
 }
 
 interface ApiCollection<T> {
@@ -527,10 +542,10 @@ export default function App() {
         <button
           className={view === 'store' ? 'active' : ''}
           onClick={() => selectView('store')}
-          title="Mini Store"
+          title="Store"
         >
           <ShoppingBasket size={20} />
-          <span>Mini Store</span>
+          <span>Store</span>
         </button>
         {user.role === 'OWNER' && (
           <button
@@ -1409,6 +1424,7 @@ function HistoryView({
                 <th>Stay</th>
                 <th>Arrival</th>
                 <th>Paid</th>
+                <th>Store purchases</th>
                 <th>Employees</th>
                 <th>Result</th>
               </tr>
@@ -1439,6 +1455,36 @@ function HistoryView({
                     </small>
                   </td>
                   <td>{formatMoney(stay.paidAmountCentavos)}</td>
+                  <td>
+                    {stay.storeSales.length === 0 ? (
+                      '—'
+                    ) : (
+                      <div className="history-store-sales">
+                        {stay.storeSales.map((sale) => (
+                          <div key={sale.id}>
+                            <strong>
+                              {sale.items
+                                .map(
+                                  (item) =>
+                                    `${item.quantity} × ${item.productNameSnapshot}`,
+                                )
+                                .join(', ')}
+                            </strong>
+                            <small>
+                              {formatMoney(sale.totalAmountCentavos)} ·{' '}
+                              {sale.paymentMethod === 'GCASH'
+                                ? 'GCash'
+                                : 'Cash'}
+                            </small>
+                            <small>
+                              {sale.handledBy.username} ·{' '}
+                              {formatDateTime(sale.createdAt)}
+                            </small>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </td>
                   <td>
                     <small>
                       In: {stay.checkedInBy?.username ?? 'Legacy record'}

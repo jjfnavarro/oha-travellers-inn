@@ -19,6 +19,6 @@ Remaining launch acceptance:
 
 Shift close and cash reconciliation remains optional and requires separate approval.
 
-## Mini Store Milestone
+## Store Milestone
 
 Implemented scope includes product management, store and extra-charge purchases, Cash/GCash collection, optional stay linking, idempotent atomic writes, historical price snapshots, financial-ledger integration, and overall/per-staff Owner reporting. Inventory and cost/profit accounting remain deferred.

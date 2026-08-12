@@ -130,7 +130,7 @@ Serve `client\dist` as the static frontend. Do not run Vite's development server
 1. Run formatting, linting, type checks, tests, and builds.
 2. Create and verify a database backup.
 3. Apply migrations before starting the new backend.
-4. Verify health, login, room board, booking list, Mini Store purchase, and Owner reports.
+4. Verify health, login, room board, booking list, Store purchase, and Owner reports.
 5. On the physical Android tablet, install from Chrome and test standalone portrait and landscape operation.
 6. Verify an offline write is blocked.
 7. Monitor server errors after release.

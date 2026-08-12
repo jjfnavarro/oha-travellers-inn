@@ -258,9 +258,9 @@ test('shows bookings and opens the touch-friendly booking form', async () => {
   expect(
     screen.queryByRole('button', { name: 'Enable sound' }),
   ).not.toBeInTheDocument();
-  fireEvent.click(await screen.findByRole('button', { name: /Mini Store/ }));
+  fireEvent.click(await screen.findByRole('button', { name: /^Store$/ }));
   expect(
-    await screen.findByRole('heading', { name: 'Mini Store' }),
+    await screen.findByRole('heading', { name: 'Store' }),
   ).toBeInTheDocument();
 
   fireEvent.click(await screen.findByRole('button', { name: /Stay history/ }));
@@ -282,6 +282,93 @@ test('shows bookings and opens the touch-friendly booking form', async () => {
   ).toBeInTheDocument();
   expect(screen.getByLabelText(/Guest name/)).not.toBeRequired();
   expect(screen.getByLabelText(/Room/)).not.toBeRequired();
+});
+
+test('shows linked extra-charge details in stay history', async () => {
+  const roomType = {
+    id: 1,
+    name: 'Standard',
+    description: null,
+    rates: [{ id: 1, durationHours: 3, amountCentavos: 25_000 }],
+  };
+  const room = {
+    id: 1,
+    number: '1',
+    displayOrder: 1,
+    operationalStatus: 'ACTIVE',
+    roomTypeId: 1,
+    stays: [],
+    roomType,
+  };
+  const historyStay = {
+    id: 10,
+    roomId: 1,
+    arrivalType: 'WALK_IN',
+    vehicleType: null,
+    guestName: null,
+    plateNumber: null,
+    durationHours: 3,
+    paidAmountCentavos: 25_000,
+    checkedInAt: '2026-08-12T00:00:00.000Z',
+    expectedCheckoutAt: '2026-08-12T03:00:00.000Z',
+    checkedOutAt: null,
+    status: 'ACTIVE',
+    extensions: [],
+    room,
+    shift: { type: 'DAY' },
+    checkedInBy: { id: 2, username: 'Dodong' },
+    checkedOutBy: null,
+    storeSales: [
+      {
+        id: 20,
+        paymentMethod: 'GCASH',
+        totalAmountCentavos: 5_000,
+        createdAt: '2026-08-12T02:00:00.000Z',
+        handledBy: { id: 2, username: 'Dodong' },
+        items: [
+          {
+            id: 30,
+            productNameSnapshot: 'Extra Pillow',
+            categorySnapshot: 'EXTRA_CHARGE',
+            unitPriceCentavos: 5_000,
+            quantity: 1,
+            lineTotalCentavos: 5_000,
+          },
+        ],
+      },
+    ],
+  };
+  vi.stubGlobal(
+    'fetch',
+    vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      const data = url.endsWith('/auth/me')
+        ? { id: 1, username: 'Zack', role: 'OWNER' }
+        : url.endsWith('/rooms')
+          ? [room]
+          : url.endsWith('/room-types')
+            ? [roomType]
+            : url.includes('/stays/history')
+              ? [historyStay]
+              : {
+                  status: 'ok',
+                  database: 'connected',
+                  timestamp: new Date().toISOString(),
+                };
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ data }),
+      } as Response);
+    }),
+  );
+
+  render(<App />);
+  fireEvent.click(await screen.findByRole('button', { name: /Stay history/ }));
+
+  expect(await screen.findByText('1 × Extra Pillow')).toBeInTheDocument();
+  expect(screen.getByText(/GCash/)).toBeInTheDocument();
+  expect(screen.getByText(/Dodong ·/)).toBeInTheDocument();
 });
 
 test('shows a prominent checkout alert when a stay is due soon', async () => {

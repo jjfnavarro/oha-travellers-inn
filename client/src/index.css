@@ -785,6 +785,15 @@ button:disabled {
 .form-error {
   color: #333333;
 }
+.extra-charge-warning {
+  margin: 12px 0 0;
+  padding: 12px 14px;
+  border: 1px solid #941515;
+  border-radius: 5px;
+  background: #b42323;
+  color: #ffffff;
+  font-weight: 750;
+}
 .empty-state {
   padding: 48px 0;
   color: #6b6b6b;
@@ -929,6 +938,23 @@ button:disabled {
   display: block;
   margin-top: 3px;
   color: #777777;
+}
+.history-store-sales {
+  min-width: 210px;
+  display: grid;
+  gap: 10px;
+}
+.history-store-sales > div {
+  padding-bottom: 9px;
+  border-bottom: 1px solid #e4e4e4;
+}
+.history-store-sales > div:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+.history-store-sales strong {
+  display: block;
+  overflow-wrap: anywhere;
 }
 .table-status {
   display: inline-block;

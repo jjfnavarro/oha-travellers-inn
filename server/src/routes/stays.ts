@@ -43,6 +43,26 @@ const stayInclude = {
     include: { createdBy: { select: { id: true, username: true } } },
     orderBy: { createdAt: 'asc' as const },
   },
+  storeSales: {
+    select: {
+      id: true,
+      paymentMethod: true,
+      totalAmountCentavos: true,
+      createdAt: true,
+      handledBy: { select: { id: true, username: true } },
+      items: {
+        select: {
+          id: true,
+          productNameSnapshot: true,
+          categorySnapshot: true,
+          unitPriceCentavos: true,
+          quantity: true,
+          lineTotalCentavos: true,
+        },
+      },
+    },
+    orderBy: { createdAt: 'asc' as const },
+  },
 };
 
 function optionalText(value: string | null | undefined): string | null {
