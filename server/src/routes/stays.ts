@@ -12,6 +12,10 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { getShiftWindow } from '../services/shift-time.js';
 import { calculateExtendedCheckout } from '../services/stay-extension.js';
+import {
+  createStayHistoryPdf,
+  createStayHistoryWorkbook,
+} from './stay-history-export.js';
 
 const checkInSchema = z.object({
   roomId: z.number().int().positive(),
@@ -27,6 +31,15 @@ const checkInSchema = z.object({
 const extensionSchema = z.object({
   durationHours: z.number().int().positive().max(24),
   paymentMethod: z.enum([PaymentMethod.CASH, PaymentMethod.GCASH]),
+});
+
+const historyQuerySchema = z.object({
+  from: z.coerce.date().optional(),
+  to: z.coerce.date().optional(),
+  roomId: z.coerce.number().int().positive().optional(),
+  roomTypeId: z.coerce.number().int().positive().optional(),
+  status: z.nativeEnum(StayStatus).optional(),
+  arrivalType: z.nativeEnum(ArrivalType).optional(),
 });
 
 const stayInclude = {
@@ -70,6 +83,34 @@ function optionalText(value: string | null | undefined): string | null {
   return trimmed ? trimmed : null;
 }
 
+type HistoryQuery = z.infer<typeof historyQuerySchema>;
+
+function historyWhere(query: HistoryQuery): Prisma.StayWhereInput {
+  return {
+    ...(query.from || query.to
+      ? {
+          checkedInAt: {
+            ...(query.from ? { gte: query.from } : {}),
+            ...(query.to ? { lte: query.to } : {}),
+          },
+        }
+      : {}),
+    ...(query.roomId ? { roomId: query.roomId } : {}),
+    ...(query.roomTypeId ? { room: { roomTypeId: query.roomTypeId } } : {}),
+    ...(query.status ? { status: query.status } : {}),
+    ...(query.arrivalType ? { arrivalType: query.arrivalType } : {}),
+  };
+}
+
+async function findHistoryStays(prisma: PrismaClient, query: HistoryQuery) {
+  return prisma.stay.findMany({
+    where: historyWhere(query),
+    include: { ...stayInclude, shift: true },
+    orderBy: { checkedInAt: 'desc' },
+    take: 500,
+  });
+}
+
 export function createStaysRouter(prisma: PrismaClient): Router {
   const router = Router();
 
@@ -83,16 +124,7 @@ export function createStaysRouter(prisma: PrismaClient): Router {
   });
 
   router.get('/history', async (request, response) => {
-    const query = z
-      .object({
-        from: z.coerce.date().optional(),
-        to: z.coerce.date().optional(),
-        roomId: z.coerce.number().int().positive().optional(),
-        roomTypeId: z.coerce.number().int().positive().optional(),
-        status: z.nativeEnum(StayStatus).optional(),
-        arrivalType: z.nativeEnum(ArrivalType).optional(),
-      })
-      .safeParse(request.query);
+    const query = historyQuerySchema.safeParse(request.query);
     if (!query.success) {
       response
         .status(400)
@@ -100,30 +132,44 @@ export function createStaysRouter(prisma: PrismaClient): Router {
       return;
     }
 
-    const stays = await prisma.stay.findMany({
-      where: {
-        ...(query.data.from || query.data.to
-          ? {
-              checkedInAt: {
-                ...(query.data.from ? { gte: query.data.from } : {}),
-                ...(query.data.to ? { lte: query.data.to } : {}),
-              },
-            }
-          : {}),
-        ...(query.data.roomId ? { roomId: query.data.roomId } : {}),
-        ...(query.data.roomTypeId
-          ? { room: { roomTypeId: query.data.roomTypeId } }
-          : {}),
-        ...(query.data.status ? { status: query.data.status } : {}),
-        ...(query.data.arrivalType
-          ? { arrivalType: query.data.arrivalType }
-          : {}),
-      },
-      include: { ...stayInclude, shift: true },
-      orderBy: { checkedInAt: 'desc' },
-      take: 500,
-    });
+    const stays = await findHistoryStays(prisma, query.data);
     response.json({ data: stays });
+  });
+
+  router.get('/history.pdf', async (request, response) => {
+    const query = historyQuerySchema.safeParse(request.query);
+    if (!query.success) {
+      response
+        .status(400)
+        .json({ message: 'One or more history filters are invalid.' });
+      return;
+    }
+    const stays = await findHistoryStays(prisma, query.data);
+    response.type('application/pdf');
+    response.setHeader(
+      'Content-Disposition',
+      'attachment; filename="oha-stay-history.pdf"',
+    );
+    response.send(await createStayHistoryPdf(stays));
+  });
+
+  router.get('/history.xlsx', async (request, response) => {
+    const query = historyQuerySchema.safeParse(request.query);
+    if (!query.success) {
+      response
+        .status(400)
+        .json({ message: 'One or more history filters are invalid.' });
+      return;
+    }
+    const stays = await findHistoryStays(prisma, query.data);
+    response.type(
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
+    response.setHeader(
+      'Content-Disposition',
+      'attachment; filename="oha-stay-history.xlsx"',
+    );
+    response.send(await createStayHistoryWorkbook(stays));
   });
 
   router.post('/check-in', async (request, response) => {

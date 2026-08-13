@@ -86,3 +86,79 @@ test('returns linked store sale details in stay history', async () => {
     }),
   );
 });
+
+test.each([
+  ['pdf', 'application/pdf', 'oha-stay-history.pdf'],
+  [
+    'xlsx',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'oha-stay-history.xlsx',
+  ],
+])(
+  'exports filtered stay history as %s for front-desk users',
+  async (extension, contentType, filename) => {
+    const findMany = vi.fn().mockResolvedValue([
+      {
+        id: 10,
+        status: 'COMPLETED',
+        arrivalType: 'VEHICLE',
+        vehicleType: 'CAR',
+        guestName: 'Guest',
+        plateNumber: 'ABC 123',
+        notes: 'Near lobby',
+        durationHours: 3,
+        paidAmountCentavos: 25_000,
+        checkedInAt: new Date('2026-08-12T00:00:00.000Z'),
+        expectedCheckoutAt: new Date('2026-08-12T03:00:00.000Z'),
+        checkedOutAt: new Date('2026-08-12T02:30:00.000Z'),
+        room: { number: '1', roomType: { name: 'Standard' } },
+        shift: { type: 'DAY' },
+        checkedInBy: { username: 'Dodong' },
+        checkedOutBy: { username: 'Dodong' },
+        extensions: [],
+        storeSales: [],
+      },
+    ]);
+    const prisma = {
+      session: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: 1,
+          expiresAt: new Date(Date.now() + 60_000),
+          staff: {
+            id: 2,
+            username: 'Dodong',
+            role: StaffRole.FRONT_DESK,
+            isActive: true,
+          },
+        }),
+      },
+      stay: { findMany },
+    } as unknown as PrismaClient;
+
+    const response = await request(createApp(environment, vi.fn(), prisma))
+      .get(
+        `/api/stays/history.${extension}?status=COMPLETED&arrivalType=VEHICLE&roomId=1&roomTypeId=1&from=2026-08-12T00:00:00.000Z&to=2026-08-13T00:00:00.000Z`,
+      )
+      .set('Cookie', 'oha_session=test');
+
+    expect(response.status).toBe(200);
+    expect(response.headers['content-type']).toContain(contentType);
+    expect(response.headers['content-disposition']).toContain(filename);
+    expect(Number(response.headers['content-length'])).toBeGreaterThan(100);
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          status: 'COMPLETED',
+          arrivalType: 'VEHICLE',
+          roomId: 1,
+          room: { roomTypeId: 1 },
+          checkedInAt: {
+            gte: new Date('2026-08-12T00:00:00.000Z'),
+            lte: new Date('2026-08-13T00:00:00.000Z'),
+          },
+        }),
+        take: 500,
+      }),
+    );
+  },
+);

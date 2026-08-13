@@ -406,6 +406,9 @@ test('shows linked extra-charge details in stay history', async () => {
   render(<App />);
   fireEvent.click(await screen.findByRole('button', { name: /Stay history/ }));
 
+  expect(screen.getByRole('button', { name: 'Print' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'PDF' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Excel' })).toBeInTheDocument();
   expect(await screen.findByText('1 × Extra Pillow')).toBeInTheDocument();
   expect(screen.getByText(/GCash/)).toBeInTheDocument();
   expect(screen.getByText(/Dodong ·/)).toBeInTheDocument();

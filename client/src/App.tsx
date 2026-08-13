@@ -476,15 +476,6 @@ export default function App() {
     <div className={`app-shell ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
       <header className="app-header">
         <div className="brand-lockup">
-          <button
-            className="sidebar-trigger"
-            type="button"
-            aria-label="Open sidebar"
-            title="Open sidebar"
-            onClick={() => setSidebarCollapsed(false)}
-          >
-            <PanelLeftOpen size={20} />
-          </button>
           <img
             className="brand-logo"
             src="/oha-logo.jpg"
@@ -1436,8 +1427,7 @@ function HistoryView({
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<string | null>(null);
 
-  useEffect(() => {
-    let active = true;
+  const historyQuery = useMemo(() => {
     const parameters = new URLSearchParams();
     if (status !== 'ALL') parameters.set('status', status);
     if (arrival !== 'ALL') parameters.set('arrivalType', arrival);
@@ -1446,9 +1436,14 @@ function HistoryView({
     if (window.to) parameters.set('to', window.to);
     if (roomId !== 'ALL') parameters.set('roomId', roomId);
     if (roomTypeId !== 'ALL') parameters.set('roomTypeId', roomTypeId);
+    return parameters.toString();
+  }, [arrival, from, period, referenceDate, roomId, roomTypeId, status, to]);
+
+  useEffect(() => {
+    let active = true;
     setLoading(true);
     setMessage(null);
-    apiRequest<ApiCollection<HistoryStay>>(`/stays/history?${parameters}`)
+    apiRequest<ApiCollection<HistoryStay>>(`/stays/history?${historyQuery}`)
       .then((response) => {
         if (active) setStays(response.data);
       })
@@ -1466,14 +1461,29 @@ function HistoryView({
     return () => {
       active = false;
     };
-  }, [arrival, from, period, referenceDate, roomId, roomTypeId, status, to]);
+  }, [historyQuery]);
+
+  const download = (extension: 'pdf' | 'xlsx') => {
+    window.location.href = `${apiUrl}/stays/history.${extension}?${historyQuery}`;
+  };
 
   return (
-    <>
+    <section className="print-report history-report">
       <div className="page-heading">
         <div>
           <h2>Stay history</h2>
           <p>Up to 500 recent check-ins</p>
+        </div>
+        <div className="export-actions">
+          <button className="secondary-button" onClick={() => window.print()}>
+            Print
+          </button>
+          <button className="secondary-button" onClick={() => download('pdf')}>
+            PDF
+          </button>
+          <button className="primary-button" onClick={() => download('xlsx')}>
+            Excel
+          </button>
         </div>
       </div>
       <div className="report-controls">
@@ -1661,7 +1671,7 @@ function HistoryView({
           </table>
         </div>
       )}
-    </>
+    </section>
   );
 }
 
