@@ -850,6 +850,24 @@ button:disabled {
 .rate-summary p {
   margin: 8px 0;
 }
+.room-rate-heading {
+  margin-top: 32px;
+}
+.room-rate-heading > div {
+  display: grid;
+  gap: 4px;
+}
+.room-rate-heading p {
+  margin: 0;
+  color: #666666;
+}
+.room-rate-table {
+  min-width: 960px;
+}
+.rate-not-offered {
+  color: #777777;
+  font-size: 0.8rem;
+}
 .report-controls {
   display: flex;
   flex-wrap: wrap;

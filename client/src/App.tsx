@@ -64,6 +64,10 @@ interface Rate {
   amountCentavos: number;
 }
 
+interface RoomRateOverride extends Rate {
+  roomId: number;
+}
+
 interface RoomType {
   id: number;
   name: string;
@@ -79,7 +83,18 @@ interface Room {
   operationalStatus: OperationalStatus;
   roomTypeId: number;
   roomType: RoomType;
+  rateOverrides: RoomRateOverride[];
   stays: Stay[];
+}
+
+function effectiveRoomRates(room: Room): Rate[] {
+  return room.roomType.rates.map((rate) => ({
+    ...rate,
+    amountCentavos:
+      (room.rateOverrides ?? []).find(
+        (override) => override.durationHours === rate.durationHours,
+      )?.amountCentavos ?? rate.amountCentavos,
+  }));
 }
 
 interface Stay {
@@ -796,6 +811,7 @@ export default function App() {
         ) : view === 'rates' ? (
           <RatesView
             roomTypes={roomTypes}
+            rooms={rooms}
             onUpdated={loadInventory}
             setError={setError}
           />
@@ -858,10 +874,12 @@ export default function App() {
 
 function RatesView({
   roomTypes,
+  rooms,
   onUpdated,
   setError,
 }: {
   roomTypes: RoomType[];
+  rooms: Room[];
   onUpdated: () => Promise<void>;
   setError: (message: string | null) => void;
 }) {
@@ -880,6 +898,22 @@ function RatesView({
       ),
   );
   const [savingId, setSavingId] = useState<number | null>(null);
+  const [roomDrafts, setRoomDrafts] = useState<
+    Record<number, Record<number, string>>
+  >(() =>
+    Object.fromEntries(
+      rooms.map((room) => [
+        room.id,
+        Object.fromEntries(
+          (room.rateOverrides ?? []).map((rate) => [
+            rate.durationHours,
+            String(rate.amountCentavos / 100),
+          ]),
+        ),
+      ]),
+    ),
+  );
+  const [savingRoomId, setSavingRoomId] = useState<number | null>(null);
 
   async function saveRates(roomType: RoomType): Promise<void> {
     const draft = drafts[roomType.id] ?? {};
@@ -913,6 +947,51 @@ function RatesView({
       );
     } finally {
       setSavingId(null);
+    }
+  }
+
+  async function saveRoomRates(room: Room): Promise<void> {
+    const draft = roomDrafts[room.id] ?? {};
+    const overrides = room.roomType.rates.flatMap((baseRate) => {
+      const value = draft[baseRate.durationHours]?.trim() ?? '';
+      if (!value) return [];
+      const amount = Number(value);
+      return Number.isFinite(amount) && amount > 0
+        ? [
+            {
+              durationHours: baseRate.durationHours,
+              amountCentavos: Math.round(amount * 100),
+            },
+          ]
+        : [];
+    });
+    const hasInvalidValue = room.roomType.rates.some((baseRate) => {
+      const value = draft[baseRate.durationHours]?.trim() ?? '';
+      return (
+        value.length > 0 &&
+        (!Number.isFinite(Number(value)) || Number(value) <= 0)
+      );
+    });
+    if (hasInvalidValue) {
+      setError('Room-specific rates must be blank or greater than zero.');
+      return;
+    }
+    setSavingRoomId(room.id);
+    setError(null);
+    try {
+      await apiRequest(`/rooms/${room.id}/rates`, {
+        method: 'PATCH',
+        body: JSON.stringify({ overrides }),
+      });
+      await onUpdated();
+    } catch (requestError: unknown) {
+      setError(
+        requestError instanceof Error
+          ? requestError.message
+          : 'Room-specific rates could not be saved.',
+      );
+    } finally {
+      setSavingRoomId(null);
     }
   }
 
@@ -994,6 +1073,79 @@ function RatesView({
               .join(' · ')}
           </p>
         ))}
+      </div>
+      <div className="section-heading room-rate-heading">
+        <div>
+          <h3>Room-specific rates</h3>
+          <p>Leave a price blank to use the room type rate.</p>
+        </div>
+      </div>
+      <div className="rate-table-wrap">
+        <table className="rate-table room-rate-table">
+          <thead>
+            <tr>
+              <th>Room</th>
+              {durations.map((duration) => (
+                <th key={duration}>{duration} hours</th>
+              ))}
+              <th>
+                <span className="visually-hidden">Actions</span>
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {rooms.map((room) => (
+              <tr key={room.id}>
+                <th>
+                  <strong>Room {room.number}</strong>
+                  <span>{room.roomType.name}</span>
+                </th>
+                {durations.map((duration) => {
+                  const baseRate = room.roomType.rates.find(
+                    (rate) => rate.durationHours === duration,
+                  );
+                  return (
+                    <td key={duration}>
+                      {baseRate ? (
+                        <label>
+                          <span>₱</span>
+                          <input
+                            aria-label={`Room ${room.number} ${duration}-hour override`}
+                            type="number"
+                            min="1"
+                            step="1"
+                            placeholder={`Default ${baseRate.amountCentavos / 100}`}
+                            value={roomDrafts[room.id]?.[duration] ?? ''}
+                            onChange={(event) =>
+                              setRoomDrafts((current) => ({
+                                ...current,
+                                [room.id]: {
+                                  ...current[room.id],
+                                  [duration]: event.target.value,
+                                },
+                              }))
+                            }
+                          />
+                        </label>
+                      ) : (
+                        <span className="rate-not-offered">Not offered</span>
+                      )}
+                    </td>
+                  );
+                })}
+                <td>
+                  <button
+                    className="secondary-button"
+                    disabled={savingRoomId === room.id}
+                    onClick={() => void saveRoomRates(room)}
+                  >
+                    {savingRoomId === room.id ? 'Saving...' : 'Save'}
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </>
   );
@@ -2277,8 +2429,9 @@ function CheckInDialog({
   onClose: () => void;
   onCheckedIn: () => Promise<void>;
 }) {
+  const roomRates = effectiveRoomRates(room);
   const [durationHours, setDurationHours] = useState(
-    String(room.roomType.rates[0]?.durationHours ?? ''),
+    String(roomRates[0]?.durationHours ?? ''),
   );
   const [arrivalType, setArrivalType] = useState<'VEHICLE' | 'WALK_IN'>(
     'VEHICLE',
@@ -2290,7 +2443,7 @@ function CheckInDialog({
   const [paymentMethod, setPaymentMethod] = useState<'CASH' | 'GCASH'>('CASH');
   const [message, setMessage] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const selectedRate = room.roomType.rates.find(
+  const selectedRate = roomRates.find(
     (rate) => rate.durationHours === Number(durationHours),
   );
 
@@ -2380,7 +2533,7 @@ function CheckInDialog({
               value={durationHours}
               onChange={(event) => setDurationHours(event.target.value)}
             >
-              {room.roomType.rates.map((rate) => (
+              {roomRates.map((rate) => (
                 <option key={rate.id} value={rate.durationHours}>
                   {rate.durationHours} hours ·{' '}
                   {formatMoney(rate.amountCentavos)}
@@ -2496,13 +2649,14 @@ function ExtendStayDialog({
   onClose: () => void;
   onExtended: () => Promise<void>;
 }) {
+  const roomRates = effectiveRoomRates(room);
   const [durationHours, setDurationHours] = useState(
-    String(room.roomType.rates[0]?.durationHours ?? ''),
+    String(roomRates[0]?.durationHours ?? ''),
   );
   const [paymentMethod, setPaymentMethod] = useState<'CASH' | 'GCASH'>('CASH');
   const [message, setMessage] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const selectedRate = room.roomType.rates.find(
+  const selectedRate = roomRates.find(
     (rate) => rate.durationHours === Number(durationHours),
   );
 
@@ -2567,7 +2721,7 @@ function ExtendStayDialog({
               value={durationHours}
               onChange={(event) => setDurationHours(event.target.value)}
             >
-              {room.roomType.rates.map((rate) => (
+              {roomRates.map((rate) => (
                 <option key={rate.id} value={rate.durationHours}>
                   Add {rate.durationHours} hours ·{' '}
                   {formatMoney(rate.amountCentavos)}

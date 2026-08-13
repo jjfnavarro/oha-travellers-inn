@@ -15,10 +15,20 @@ const roomSchema = z.object({
   operationalStatus: z.nativeEnum(RoomOperationalStatus),
 });
 
+const roomRatesSchema = z.object({
+  overrides: z.array(
+    z.object({
+      durationHours: z.number().int().positive().max(24),
+      amountCentavos: z.number().int().positive(),
+    }),
+  ),
+});
+
 const roomInclude = {
   roomType: {
     include: { rates: { orderBy: { durationHours: 'asc' as const } } },
   },
+  rateOverrides: { orderBy: { durationHours: 'asc' as const } },
   stays: {
     where: { status: 'ACTIVE' as const },
     orderBy: { checkedInAt: 'desc' as const },
@@ -92,6 +102,80 @@ export function createRoomsRouter(prisma: PrismaClient): Router {
         response
           .status(400)
           .json({ message: 'The selected room type does not exist.' });
+        return;
+      }
+      throw error;
+    }
+  });
+
+  router.patch('/:id/rates', requireOwner, async (request, response) => {
+    const id = z.coerce.number().int().positive().safeParse(request.params.id);
+    const body = roomRatesSchema.safeParse(request.body);
+    if (!id.success || !body.success) {
+      response
+        .status(400)
+        .json({ message: 'Provide valid room rate overrides.' });
+      return;
+    }
+    const durations = body.data.overrides.map((rate) => rate.durationHours);
+    if (new Set(durations).size !== durations.length) {
+      response
+        .status(400)
+        .json({ message: 'Each duration can only be overridden once.' });
+      return;
+    }
+    try {
+      const room = await prisma.$transaction(async (transaction) => {
+        const previous = await transaction.room.findUnique({
+          where: { id: id.data },
+          include: roomInclude,
+        });
+        if (!previous) throw new RoomRateRuleError('Room not found.', 404);
+        const offeredDurations = new Set(
+          previous.roomType.rates.map((rate) => rate.durationHours),
+        );
+        if (durations.some((duration) => !offeredDurations.has(duration))) {
+          throw new RoomRateRuleError(
+            'A room can only override durations offered by its room type.',
+            400,
+          );
+        }
+        await transaction.roomRateOverride.deleteMany({
+          where: { roomId: previous.id },
+        });
+        if (body.data.overrides.length > 0) {
+          await transaction.roomRateOverride.createMany({
+            data: body.data.overrides.map((rate) => ({
+              roomId: previous.id,
+              ...rate,
+            })),
+          });
+        }
+        const updated = await transaction.room.findUniqueOrThrow({
+          where: { id: previous.id },
+          include: roomInclude,
+        });
+        await transaction.auditLog.create({
+          data: {
+            staffId: request.authUser.id,
+            action: 'ROOM_RATE_UPDATE',
+            entityType: 'ROOM',
+            entityId: String(previous.id),
+            details: {
+              previousValue: previous.rateOverrides.map((rate) => ({
+                durationHours: rate.durationHours,
+                amountCentavos: rate.amountCentavos,
+              })),
+              newValue: body.data.overrides,
+            },
+          },
+        });
+        return updated;
+      });
+      response.json({ data: room });
+    } catch (error: unknown) {
+      if (error instanceof RoomRateRuleError) {
+        response.status(error.statusCode).json({ message: error.message });
         return;
       }
       throw error;
@@ -199,4 +283,13 @@ export function createRoomsRouter(prisma: PrismaClient): Router {
   });
 
   return router;
+}
+
+class RoomRateRuleError extends Error {
+  constructor(
+    message: string,
+    readonly statusCode: number,
+  ) {
+    super(message);
+  }
 }

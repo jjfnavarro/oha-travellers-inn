@@ -66,7 +66,7 @@ async function seed(): Promise<void> {
     });
 
     for (const number of roomTypeData.rooms) {
-      await prisma.room.upsert({
+      const room = await prisma.room.upsert({
         where: { number },
         update: { roomTypeId: roomType.id, displayOrder },
         create: {
@@ -76,6 +76,26 @@ async function seed(): Promise<void> {
           operationalStatus: RoomOperationalStatus.ACTIVE,
         },
       });
+      const standardThreeHourOverride = ['7', '8', 'A', 'B', 'C'].includes(
+        number,
+      )
+        ? 30_000
+        : ['9', '10'].includes(number)
+          ? 35_000
+          : null;
+      if (standardThreeHourOverride) {
+        await prisma.roomRateOverride.upsert({
+          where: {
+            roomId_durationHours: { roomId: room.id, durationHours: 3 },
+          },
+          update: { amountCentavos: standardThreeHourOverride },
+          create: {
+            roomId: room.id,
+            durationHours: 3,
+            amountCentavos: standardThreeHourOverride,
+          },
+        });
+      }
       displayOrder += 1;
     }
   }

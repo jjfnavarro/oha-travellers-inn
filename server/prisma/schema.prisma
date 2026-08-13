@@ -94,6 +94,19 @@ model StayRate {
   @@index([roomTypeId])
 }
 
+model RoomRateOverride {
+  id             Int      @id @default(autoincrement())
+  roomId         Int
+  durationHours  Int
+  amountCentavos Int
+  room           Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([roomId, durationHours])
+  @@index([roomId])
+}
+
 model Room {
   id                Int                   @id @default(autoincrement())
   number            String                @unique @db.VarChar(10)
@@ -101,6 +114,7 @@ model Room {
   operationalStatus RoomOperationalStatus @default(ACTIVE)
   roomTypeId        Int
   roomType          RoomType              @relation(fields: [roomTypeId], references: [id], onDelete: Restrict)
+  rateOverrides     RoomRateOverride[]
   stays             Stay[]
   bookings          Booking[]
   createdAt         DateTime              @default(now())

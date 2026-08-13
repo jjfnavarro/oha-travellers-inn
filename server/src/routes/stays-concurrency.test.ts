@@ -46,6 +46,7 @@ function activeRoom(
       name: 'Standard',
       rates: [{ id: 1, durationHours: 3, amountCentavos: 25_000 }],
     },
+    rateOverrides: [],
   };
 }
 
@@ -137,6 +138,49 @@ describe('stay concurrency and cleaning rules', () => {
       });
 
     expect(response.status).toBe(409);
+  });
+
+  test('charges a room-specific rate override at check-in', async () => {
+    const room = {
+      ...activeRoom(),
+      number: '7',
+      rateOverrides: [
+        { id: 1, roomId: 1, durationHours: 3, amountCentavos: 30_000 },
+      ],
+    };
+    const transaction = {
+      room: { findUnique: vi.fn().mockResolvedValue(room) },
+      stay: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockResolvedValue({ id: 1, roomId: 1 }),
+      },
+      shift: { upsert: vi.fn().mockResolvedValue({ id: 1 }) },
+      financialTransaction: { create: vi.fn().mockResolvedValue({ id: 1 }) },
+      auditLog: { create: vi.fn().mockResolvedValue({ id: 1 }) },
+    };
+    const prisma = {
+      session: { findUnique: vi.fn().mockResolvedValue(authSession) },
+      $transaction: vi.fn(async (callback: (client: unknown) => unknown) =>
+        callback(transaction),
+      ),
+    } as unknown as PrismaClient;
+
+    const response = await request(
+      createApp(environment, vi.fn().mockResolvedValue(undefined), prisma),
+    )
+      .post('/api/stays/check-in')
+      .set('Cookie', 'oha_session=test')
+      .send({
+        roomId: 1,
+        durationHours: 3,
+        arrivalType: ArrivalType.WALK_IN,
+        paymentMethod: PaymentMethod.CASH,
+      });
+
+    expect(response.status).toBe(201);
+    expect(transaction.financialTransaction.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ amountCentavos: 30_000 }),
+    });
   });
 
   test('moves a checked-out room to cleaning in the same transaction', async () => {

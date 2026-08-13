@@ -31,6 +31,21 @@ interface BookingRoom {
     name: string;
     rates: { id: number; durationHours: number; amountCentavos: number }[];
   };
+  rateOverrides: {
+    id: number;
+    roomId: number;
+    durationHours: number;
+    amountCentavos: number;
+  }[];
+}
+
+function effectiveRoomRate(room: BookingRoom, durationHours: number) {
+  return (
+    (room.rateOverrides ?? []).find(
+      (rate) => rate.durationHours === durationHours,
+    ) ??
+    room.roomType.rates.find((rate) => rate.durationHours === durationHours)
+  );
 }
 
 interface Booking {
@@ -780,9 +795,9 @@ function ArrivalDialog({
   const selectedRoom = availableRooms.find(
     (room) => room.id === Number(roomId),
   );
-  const rate = selectedRoom?.roomType.rates.find(
-    (item) => item.durationHours === booking.expectedDurationHours,
-  );
+  const rate = selectedRoom
+    ? effectiveRoomRate(selectedRoom, booking.expectedDurationHours)
+    : undefined;
 
   async function submit(event: FormEvent): Promise<void> {
     event.preventDefault();

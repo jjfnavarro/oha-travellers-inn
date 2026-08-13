@@ -467,7 +467,10 @@ export function createBookingsRouter(prisma: PrismaClient): Router {
           }
           const room = await transaction.room.findUnique({
             where: { id: roomId },
-            include: { roomType: { include: { rates: true } } },
+            include: {
+              roomType: { include: { rates: true } },
+              rateOverrides: true,
+            },
           });
           if (!room) throw new BookingRuleError('Room not found.', 404);
           if (room.operationalStatus !== RoomOperationalStatus.ACTIVE) {
@@ -483,9 +486,13 @@ export function createBookingsRouter(prisma: PrismaClient): Router {
           ) {
             throw new BookingRuleError('This room is already occupied.', 409);
           }
-          const rate = room.roomType.rates.find(
-            (item) => item.durationHours === booking.expectedDurationHours,
-          );
+          const rate =
+            room.rateOverrides.find(
+              (item) => item.durationHours === booking.expectedDurationHours,
+            ) ??
+            room.roomType.rates.find(
+              (item) => item.durationHours === booking.expectedDurationHours,
+            );
           if (!rate) {
             throw new BookingRuleError(
               'The booked duration is not offered for this room.',

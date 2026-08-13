@@ -90,6 +90,14 @@ export function createRoomTypesRouter(prisma: PrismaClient): Router {
         await transaction.stayRate.deleteMany({
           where: { roomTypeId: id.data },
         });
+        await transaction.roomRateOverride.deleteMany({
+          where: {
+            room: { roomTypeId: id.data },
+            durationHours: {
+              notIn: body.data.rates.map((rate) => rate.durationHours),
+            },
+          },
+        });
         const updated = await transaction.roomType.update({
           where: { id: id.data },
           data: {

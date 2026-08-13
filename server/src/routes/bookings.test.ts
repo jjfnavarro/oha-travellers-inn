@@ -57,6 +57,7 @@ function conversionDatabase(failFinancialWrite = false) {
         roomType: {
           rates: [{ durationHours: 3, amountCentavos: 45_000 }],
         },
+        rateOverrides: [],
       }),
     },
     stay: {

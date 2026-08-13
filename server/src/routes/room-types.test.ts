@@ -31,6 +31,9 @@ describe('rate auditing', () => {
         update: vi.fn().mockResolvedValue(updated),
       },
       stayRate: { deleteMany: vi.fn().mockResolvedValue({ count: 1 }) },
+      roomRateOverride: {
+        deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+      },
       auditLog: { create: vi.fn().mockResolvedValue({ id: 1 }) },
     };
     const prisma = {

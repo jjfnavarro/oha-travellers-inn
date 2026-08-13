@@ -140,7 +140,10 @@ export function createStaysRouter(prisma: PrismaClient): Router {
         async (transaction) => {
           const room = await transaction.room.findUnique({
             where: { id: result.data.roomId },
-            include: { roomType: { include: { rates: true } } },
+            include: {
+              roomType: { include: { rates: true } },
+              rateOverrides: true,
+            },
           });
 
           if (!room) throw new StayRuleError('Room not found.', 404);
@@ -157,9 +160,13 @@ export function createStaysRouter(prisma: PrismaClient): Router {
           if (existingStay)
             throw new StayRuleError('This room is already occupied.', 409);
 
-          const rate = room.roomType.rates.find(
-            (item) => item.durationHours === result.data.durationHours,
-          );
+          const rate =
+            room.rateOverrides.find(
+              (item) => item.durationHours === result.data.durationHours,
+            ) ??
+            room.roomType.rates.find(
+              (item) => item.durationHours === result.data.durationHours,
+            );
           if (!rate) {
             throw new StayRuleError(
               'The selected stay duration is not offered for this room.',
@@ -264,15 +271,24 @@ export function createStaysRouter(prisma: PrismaClient): Router {
           const activeStay = await transaction.stay.findFirst({
             where: { id: id.data, status: StayStatus.ACTIVE },
             include: {
-              room: { include: { roomType: { include: { rates: true } } } },
+              room: {
+                include: {
+                  roomType: { include: { rates: true } },
+                  rateOverrides: true,
+                },
+              },
             },
           });
           if (!activeStay) {
             throw new StayRuleError('This stay is no longer active.', 409);
           }
-          const rate = activeStay.room.roomType.rates.find(
-            (item) => item.durationHours === body.data.durationHours,
-          );
+          const rate =
+            activeStay.room.rateOverrides.find(
+              (item) => item.durationHours === body.data.durationHours,
+            ) ??
+            activeStay.room.roomType.rates.find(
+              (item) => item.durationHours === body.data.durationHours,
+            );
           if (!rate) {
             throw new StayRuleError(
               'The selected extension is not offered for this room type.',
