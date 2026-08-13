@@ -40,7 +40,7 @@ export function createApp(
   app.use(
     helmet({
       contentSecurityPolicy: {
-        directives: { imgSrc: ["'self'", 'data:', 'https:'] },
+        directives: { imgSrc: ["'self'", 'data:', 'blob:', 'https:'] },
       },
     }),
   );

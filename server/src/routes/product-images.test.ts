@@ -42,6 +42,15 @@ async function setup(role: StaffRole) {
 }
 
 describe('product image uploads', () => {
+  test('allows browser-generated image previews in production', async () => {
+    const { app } = await setup(StaffRole.OWNER);
+    const response = await request(app).get('/api/health');
+
+    expect(response.headers['content-security-policy']).toContain(
+      "img-src 'self' data: blob: https:",
+    );
+  });
+
   test('stores and serves a validated Owner upload', async () => {
     const { app, directory } = await setup(StaffRole.OWNER);
     const png = Buffer.from([
