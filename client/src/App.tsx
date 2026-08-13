@@ -611,6 +611,15 @@ export default function App() {
           </button>
         )}
       </nav>
+      <button
+        className="sidebar-floating-trigger"
+        type="button"
+        aria-label="Open sidebar"
+        title="Open sidebar"
+        onClick={() => setSidebarCollapsed(false)}
+      >
+        <PanelLeftOpen size={22} />
+      </button>
       {!sidebarCollapsed && (
         <button
           className="sidebar-scrim"

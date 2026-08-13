@@ -68,6 +68,46 @@ test('shows the staff login when there is no authenticated session', async () =>
   ).toBeInTheDocument();
 });
 
+test('keeps a floating sidebar control available while navigation is hidden', async () => {
+  window.localStorage.setItem('oha-sidebar-collapsed', 'true');
+  vi.stubGlobal(
+    'fetch',
+    vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      const data = url.endsWith('/auth/me')
+        ? { id: 1, username: 'Zack', role: 'OWNER' }
+        : url.endsWith('/health')
+          ? {
+              status: 'ok',
+              database: 'connected',
+              timestamp: new Date().toISOString(),
+            }
+          : [];
+
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ data }),
+      });
+    }),
+  );
+
+  const { container } = render(<App />);
+
+  await screen.findByRole('heading', { name: 'Room inventory' });
+  const floatingTrigger = container.querySelector<HTMLButtonElement>(
+    '.sidebar-floating-trigger',
+  );
+
+  expect(floatingTrigger).not.toBeNull();
+  expect(container.querySelector('.app-shell')).toHaveClass(
+    'sidebar-collapsed',
+  );
+  fireEvent.click(floatingTrigger!);
+  expect(container.querySelector('.app-shell')).not.toHaveClass(
+    'sidebar-collapsed',
+  );
+});
+
 test('shows Owner reporting controls and financial transaction totals', async () => {
   const storeReport = {
     selectedStaff: null,

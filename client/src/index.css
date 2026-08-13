@@ -298,6 +298,25 @@ h1 {
 .sidebar-scrim {
   display: none;
 }
+.sidebar-floating-trigger {
+  display: none;
+}
+.sidebar-collapsed .sidebar-floating-trigger {
+  position: fixed;
+  left: max(16px, env(safe-area-inset-left));
+  bottom: max(16px, env(safe-area-inset-bottom));
+  z-index: 9;
+  display: grid;
+  width: 48px;
+  height: 48px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid #444444;
+  border-radius: 6px;
+  background: #191919;
+  color: #ffffff;
+  box-shadow: 0 5px 18px rgb(0 0 0 / 24%);
+}
 .content {
   grid-column: 2;
   grid-row: 3;
@@ -2007,6 +2026,7 @@ button:disabled {
 
 @media (pointer: coarse) {
   .sidebar-trigger,
+  .sidebar-floating-trigger,
   .logout-button,
   .sound-button,
   .tabs .sidebar-heading button,
@@ -2023,6 +2043,7 @@ button:disabled {
   }
 
   .sidebar-trigger,
+  .sidebar-floating-trigger,
   .tabs .sidebar-heading button,
   .icon-button {
     width: 48px;
@@ -2041,6 +2062,7 @@ button:disabled {
 @media print {
   .app-header,
   .tabs,
+  .sidebar-floating-trigger,
   .error-banner,
   .print-report .export-actions,
   .print-report .report-controls {
