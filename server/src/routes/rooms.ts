@@ -9,7 +9,7 @@ import { z } from 'zod';
 import { requireOwner } from '../middleware/auth.js';
 
 const roomSchema = z.object({
-  number: z.string().trim().min(1).max(10),
+  number: z.string().trim().min(1).max(30),
   roomTypeId: z.number().int().positive(),
   displayOrder: z.number().int().positive(),
   operationalStatus: z.nativeEnum(RoomOperationalStatus),
@@ -80,12 +80,33 @@ export function createRoomsRouter(prisma: PrismaClient): Router {
       return;
     }
     try {
-      const room = await prisma.room.create({
-        data: result.data,
-        include: roomInclude,
+      const room = await prisma.$transaction(async (transaction) => {
+        const created = await transaction.room.create({
+          data: result.data,
+          include: roomInclude,
+        });
+        await transaction.auditLog.create({
+          data: {
+            staffId: request.authUser.id,
+            action: 'ROOM_CREATE',
+            entityType: 'ROOM',
+            entityId: String(created.id),
+            details: {
+              number: created.number,
+              roomTypeId: created.roomTypeId,
+              displayOrder: created.displayOrder,
+              operationalStatus: created.operationalStatus,
+            },
+          },
+        });
+        return created;
       });
       response.status(201).json({ data: room });
     } catch (error: unknown) {
+      if (error instanceof RoomRateRuleError) {
+        response.status(error.statusCode).json({ message: error.message });
+        return;
+      }
       if (
         error instanceof Prisma.PrismaClientKnownRequestError &&
         error.code === 'P2002'
@@ -200,16 +221,42 @@ export function createRoomsRouter(prisma: PrismaClient): Router {
       });
       return;
     }
+    if (
+      request.authUser.role === StaffRole.FRONT_DESK &&
+      body.data.operationalStatus === RoomOperationalStatus.INACTIVE
+    ) {
+      response
+        .status(403)
+        .json({ message: 'Only the Owner can archive a room.' });
+      return;
+    }
     try {
       const existingRoom = await prisma.room.findUnique({
         where: { id: id.data },
-        select: { operationalStatus: true },
+        include: { _count: { select: { stays: true, bookings: true } } },
       });
       if (!existingRoom) {
         response.status(404).json({ message: 'Room not found.' });
         return;
       }
-      if (body.data.operationalStatus !== undefined) {
+      if (
+        request.authUser.role === StaffRole.FRONT_DESK &&
+        existingRoom.operationalStatus === RoomOperationalStatus.INACTIVE
+      ) {
+        response.status(403).json({
+          message: 'Only the Owner can restore an archived room.',
+        });
+        return;
+      }
+      const identityChanged =
+        (body.data.number !== undefined &&
+          body.data.number !== existingRoom.number) ||
+        (body.data.roomTypeId !== undefined &&
+          body.data.roomTypeId !== existingRoom.roomTypeId);
+      if (
+        body.data.operationalStatus !== undefined &&
+        body.data.operationalStatus !== existingRoom.operationalStatus
+      ) {
         const activeStay = await prisma.stay.findUnique({
           where: { activeRoomId: id.data },
         });
@@ -234,18 +281,50 @@ export function createRoomsRouter(prisma: PrismaClient): Router {
           : {}),
       };
       const room = await prisma.$transaction(async (transaction) => {
+        if (
+          body.data.roomTypeId !== undefined &&
+          body.data.roomTypeId !== existingRoom.roomTypeId
+        ) {
+          const roomType = await transaction.roomType.findUnique({
+            where: { id: body.data.roomTypeId },
+            select: { rates: { select: { durationHours: true } } },
+          });
+          if (!roomType) {
+            throw new RoomRateRuleError(
+              'The selected room type does not exist.',
+              400,
+            );
+          }
+          await transaction.roomRateOverride.deleteMany({
+            where: {
+              roomId: existingRoom.id,
+              durationHours: {
+                notIn: roomType.rates.map((rate) => rate.durationHours),
+              },
+            },
+          });
+        }
         const updatedRoom = await transaction.room.update({
           where: { id: id.data },
           data,
           include: roomInclude,
         });
-        const action =
-          existingRoom.operationalStatus === RoomOperationalStatus.CLEANING &&
-          updatedRoom.operationalStatus === RoomOperationalStatus.ACTIVE
-            ? 'MARK_ROOM_AVAILABLE'
-            : updatedRoom.operationalStatus === RoomOperationalStatus.CLEANING
-              ? 'MARK_ROOM_CLEANING'
-              : 'ROOM_STATUS_UPDATE';
+        const action = identityChanged
+          ? 'ROOM_EDIT'
+          : updatedRoom.operationalStatus === RoomOperationalStatus.INACTIVE
+            ? 'ROOM_ARCHIVE'
+            : existingRoom.operationalStatus ===
+                  RoomOperationalStatus.INACTIVE &&
+                updatedRoom.operationalStatus === RoomOperationalStatus.ACTIVE
+              ? 'ROOM_RESTORE'
+              : existingRoom.operationalStatus ===
+                    RoomOperationalStatus.CLEANING &&
+                  updatedRoom.operationalStatus === RoomOperationalStatus.ACTIVE
+                ? 'MARK_ROOM_AVAILABLE'
+                : updatedRoom.operationalStatus ===
+                    RoomOperationalStatus.CLEANING
+                  ? 'MARK_ROOM_CLEANING'
+                  : 'ROOM_STATUS_UPDATE';
         await transaction.auditLog.create({
           data: {
             staffId: request.authUser?.id,
@@ -253,8 +332,18 @@ export function createRoomsRouter(prisma: PrismaClient): Router {
             entityType: 'ROOM',
             entityId: String(updatedRoom.id),
             details: {
-              previousValue: existingRoom.operationalStatus,
-              newValue: updatedRoom.operationalStatus,
+              previousValue: {
+                number: existingRoom.number,
+                roomTypeId: existingRoom.roomTypeId,
+                displayOrder: existingRoom.displayOrder,
+                operationalStatus: existingRoom.operationalStatus,
+              },
+              newValue: {
+                number: updatedRoom.number,
+                roomTypeId: updatedRoom.roomTypeId,
+                displayOrder: updatedRoom.displayOrder,
+                operationalStatus: updatedRoom.operationalStatus,
+              },
             },
           },
         });
@@ -262,6 +351,10 @@ export function createRoomsRouter(prisma: PrismaClient): Router {
       });
       response.json({ data: room });
     } catch (error: unknown) {
+      if (error instanceof RoomRateRuleError) {
+        response.status(error.statusCode).json({ message: error.message });
+        return;
+      }
       if (
         error instanceof Prisma.PrismaClientKnownRequestError &&
         error.code === 'P2025'
@@ -276,6 +369,66 @@ export function createRoomsRouter(prisma: PrismaClient): Router {
         response.status(409).json({
           message: 'The room number or display order already exists.',
         });
+        return;
+      }
+      throw error;
+    }
+  });
+
+  router.delete('/:id', requireOwner, async (request, response) => {
+    const id = z.coerce.number().int().positive().safeParse(request.params.id);
+    if (!id.success) {
+      response.status(400).json({ message: 'Invalid room ID.' });
+      return;
+    }
+    try {
+      const deleted = await prisma.$transaction(async (transaction) => {
+        const room = await transaction.room.findUnique({
+          where: { id: id.data },
+          include: {
+            roomType: { select: { name: true } },
+            _count: { select: { stays: true, bookings: true } },
+          },
+        });
+        if (!room) throw new RoomRateRuleError('Room not found.', 404);
+        const operationalHistory = await transaction.auditLog.count({
+          where: {
+            entityType: 'ROOM',
+            entityId: String(room.id),
+            action: { notIn: ['ROOM_CREATE', 'ROOM_EDIT', 'ROOM_RATE_UPDATE'] },
+          },
+        });
+        if (
+          room._count.stays > 0 ||
+          room._count.bookings > 0 ||
+          operationalHistory > 0
+        ) {
+          throw new RoomRateRuleError(
+            'This room has operational history and cannot be permanently deleted. Archive it instead.',
+            409,
+          );
+        }
+        await transaction.room.delete({ where: { id: room.id } });
+        await transaction.auditLog.create({
+          data: {
+            staffId: request.authUser.id,
+            action: 'ROOM_DELETE',
+            entityType: 'ROOM',
+            entityId: String(room.id),
+            details: {
+              number: room.number,
+              roomType: room.roomType.name,
+              roomTypeId: room.roomTypeId,
+              displayOrder: room.displayOrder,
+            },
+          },
+        });
+        return room;
+      });
+      response.json({ data: { id: deleted.id, number: deleted.number } });
+    } catch (error: unknown) {
+      if (error instanceof RoomRateRuleError) {
+        response.status(error.statusCode).json({ message: error.message });
         return;
       }
       throw error;

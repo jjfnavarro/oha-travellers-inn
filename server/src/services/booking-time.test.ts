@@ -40,4 +40,19 @@ describe('booking time rules', () => {
       ),
     ).toBe(false);
   });
+
+  test('detects a conflict anywhere in a three-day booking interval', () => {
+    expect(
+      bookingWindowsOverlap(
+        {
+          estimatedArrivalAt: new Date('2026-09-01T06:00:00.000Z'),
+          expectedDurationHours: 72,
+        },
+        {
+          estimatedArrivalAt: new Date('2026-09-03T05:00:00.000Z'),
+          expectedDurationHours: 3,
+        },
+      ),
+    ).toBe(true);
+  });
 });

@@ -47,6 +47,7 @@ enum StaffRole {
 enum PaymentMethod {
   CASH
   GCASH
+  CARD
   UNKNOWN
 }
 
@@ -55,6 +56,13 @@ enum FinancialTransactionType {
   EXTENSION_CHARGE
   STORE_SALE
   EXTRA_CHARGE
+  EXPENSE
+  EXPENSE_REVERSAL
+}
+
+enum ExpenseStatus {
+  ACTIVE
+  VOIDED
 }
 
 enum ProductCategory {
@@ -109,7 +117,7 @@ model RoomRateOverride {
 
 model Room {
   id                Int                   @id @default(autoincrement())
-  number            String                @unique @db.VarChar(10)
+  number            String                @unique @db.VarChar(30)
   displayOrder      Int                   @unique
   operationalStatus RoomOperationalStatus @default(ACTIVE)
   roomTypeId        Int
@@ -143,6 +151,8 @@ model Stay {
   notes                 String?                @db.VarChar(500)
   durationHours         Int
   paidAmountCentavos    Int
+  rateAmountCentavos    Int?
+  numberOfDays          Int?
   checkedInAt           DateTime               @default(now())
   expectedCheckoutAt    DateTime
   checkedOutAt          DateTime?
@@ -177,6 +187,8 @@ model StaffAccount {
   createdProducts     Product[]             @relation("ProductCreatedBy")
   updatedProducts     Product[]             @relation("ProductUpdatedBy")
   handledStoreSales   StoreSale[]
+  recordedExpenses    Expense[]              @relation("ExpenseRecordedBy")
+  voidedExpenses      Expense[]              @relation("ExpenseVoidedBy")
   createdAt           DateTime               @default(now())
   updatedAt           DateTime               @updatedAt
 }
@@ -230,6 +242,8 @@ model FinancialTransaction {
   stay            Stay?                    @relation(fields: [stayId], references: [id], onDelete: Restrict)
   storeSaleId     Int?
   storeSale       StoreSale?               @relation(fields: [storeSaleId], references: [id], onDelete: Restrict)
+  expenseId       Int?
+  expense         Expense?                 @relation(fields: [expenseId], references: [id], onDelete: Restrict)
   handledById     Int?
   handledBy       StaffAccount?            @relation(fields: [handledById], references: [id], onDelete: Restrict)
   transactionType FinancialTransactionType
@@ -240,6 +254,7 @@ model FinancialTransaction {
 
   @@index([stayId, createdAt])
   @@index([storeSaleId, createdAt])
+  @@index([expenseId, createdAt])
   @@index([handledById, createdAt])
   @@index([transactionType, createdAt])
 }
@@ -306,6 +321,7 @@ model Shift {
   startsAt  DateTime  @unique
   endsAt    DateTime
   stays     Stay[]
+  expenses  Expense[]
   createdAt DateTime  @default(now())
 
   @@index([type, startsAt])
@@ -318,6 +334,7 @@ model Booking {
   roomId                Int?
   room                  Room?          @relation(fields: [roomId], references: [id], onDelete: Restrict)
   expectedDurationHours Int
+  numberOfDays          Int?
   guestName             String?        @db.VarChar(100)
   contactNumber         String?        @db.VarChar(30)
   arrivalType           ArrivalType?
@@ -339,4 +356,29 @@ model Booking {
   @@index([roomId, estimatedArrivalAt])
   @@index([createdByUserId, createdAt])
   @@index([updatedByUserId])
+}
+
+model Expense {
+  id                    Int                    @id @default(autoincrement())
+  amountCentavos        Int
+  reason                String                 @db.VarChar(500)
+  status                ExpenseStatus          @default(ACTIVE)
+  idempotencyKey        String                 @unique @db.Char(36)
+  businessDate          DateTime               @db.Date
+  shiftId               Int
+  shift                 Shift                  @relation(fields: [shiftId], references: [id], onDelete: Restrict)
+  recordedById          Int
+  recordedBy            StaffAccount           @relation("ExpenseRecordedBy", fields: [recordedById], references: [id], onDelete: Restrict)
+  voidedById            Int?
+  voidedBy              StaffAccount?          @relation("ExpenseVoidedBy", fields: [voidedById], references: [id], onDelete: Restrict)
+  voidReason            String?                @db.VarChar(500)
+  voidedAt              DateTime?
+  financialTransactions FinancialTransaction[]
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+
+  @@index([businessDate, status])
+  @@index([shiftId, createdAt])
+  @@index([recordedById, createdAt])
+  @@index([voidedById])
 }

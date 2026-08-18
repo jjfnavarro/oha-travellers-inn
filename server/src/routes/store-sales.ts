@@ -12,7 +12,11 @@ import { z } from 'zod';
 const purchaseSchema = z.object({
   productId: z.number().int().positive(),
   quantity: z.number().int().min(1).max(100),
-  paymentMethod: z.enum([PaymentMethod.CASH, PaymentMethod.GCASH]),
+  paymentMethod: z.enum([
+    PaymentMethod.CASH,
+    PaymentMethod.GCASH,
+    PaymentMethod.CARD,
+  ]),
   stayId: z.number().int().positive().optional().nullable(),
   idempotencyKey: z.string().uuid(),
 });

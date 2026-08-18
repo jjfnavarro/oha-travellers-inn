@@ -169,6 +169,17 @@ describe('Owner reporting', () => {
     expect(window.label).toBe('Week of 2026-08-09');
   });
 
+  test('uses operational year boundaries', () => {
+    const window = resolveOwnerReportWindow({
+      preset: 'year',
+      shift: 'ALL',
+      date: '2026-08-11',
+      now,
+    });
+    expect(window.startsAt.toISOString()).toBe('2026-01-01T00:00:00.000Z');
+    expect(window.endsAt.toISOString()).toBe('2027-01-01T00:00:00.000Z');
+  });
+
   test('uses the 8 AM operational boundary for custom ranges', () => {
     const window = resolveOwnerReportWindow({
       preset: 'custom',
@@ -207,9 +218,116 @@ describe('Owner reporting', () => {
     });
     expect(report.packages).toEqual(
       expect.arrayContaining([
-        { durationHours: 3, count: 1, revenueCentavos: 25_000 },
-        { durationHours: 6, count: 1, revenueCentavos: 50_000 },
+        expect.objectContaining({
+          durationHours: 3,
+          count: 1,
+          revenueCentavos: 25_000,
+        }),
+        expect.objectContaining({
+          durationHours: 6,
+          count: 1,
+          revenueCentavos: 50_000,
+        }),
       ]),
+    );
+  });
+
+  test('separates Card, Cash expenses, net revenue, and remaining Cash', async () => {
+    const expense = {
+      id: 10,
+      reason: 'Cleaning materials',
+      status: 'ACTIVE',
+      businessDate: new Date('2026-08-08T00:00:00.000Z'),
+      recordedById: 2,
+      recordedBy: { id: 2, username: 'Along' },
+      shift: { id: 1, type: 'DAY' },
+      voidedAt: null,
+      voidReason: null,
+      voidedBy: null,
+    };
+    const transactions = [
+      {
+        id: 1,
+        stayId: null,
+        handledById: 2,
+        transactionType: FinancialTransactionType.ROOM_CHARGE,
+        amountCentavos: 800_000,
+        paymentMethod: PaymentMethod.CASH,
+        createdAt: new Date('2026-08-08T01:00:00.000Z'),
+        handledBy: { id: 2, username: 'Along' },
+        stay: null,
+        expense: null,
+      },
+      {
+        id: 2,
+        stayId: null,
+        handledById: 2,
+        transactionType: FinancialTransactionType.STORE_SALE,
+        amountCentavos: 200_000,
+        paymentMethod: PaymentMethod.GCASH,
+        createdAt: new Date('2026-08-08T02:00:00.000Z'),
+        handledBy: { id: 2, username: 'Along' },
+        stay: null,
+        expense: null,
+      },
+      {
+        id: 3,
+        stayId: null,
+        handledById: 2,
+        transactionType: FinancialTransactionType.EXTRA_CHARGE,
+        amountCentavos: 200_000,
+        paymentMethod: PaymentMethod.CARD,
+        createdAt: new Date('2026-08-08T03:00:00.000Z'),
+        handledBy: { id: 2, username: 'Along' },
+        stay: null,
+        expense: null,
+      },
+      {
+        id: 4,
+        stayId: null,
+        handledById: 2,
+        transactionType: FinancialTransactionType.EXPENSE,
+        amountCentavos: 150_000,
+        paymentMethod: PaymentMethod.CASH,
+        createdAt: new Date('2026-08-08T04:00:00.000Z'),
+        handledBy: { id: 2, username: 'Along' },
+        stay: null,
+        expense,
+      },
+    ];
+    const prisma = {
+      staffAccount: { findFirst: vi.fn() },
+      stay: { findMany: vi.fn().mockResolvedValue([]) },
+      financialTransaction: {
+        findMany: vi.fn().mockResolvedValue(transactions),
+      },
+      stayExtension: { findMany: vi.fn().mockResolvedValue([]) },
+      auditLog: { findMany: vi.fn().mockResolvedValue([]) },
+      room: { findMany: vi.fn().mockResolvedValue([]) },
+    } as unknown as PrismaClient;
+
+    const report = await buildOwnerReport(prisma, {
+      preset: 'specific_date',
+      shift: 'ALL',
+      date: '2026-08-08',
+      now,
+    });
+
+    expect(report.financial).toMatchObject({
+      grossRevenueCentavos: 1_200_000,
+      cashRevenueCentavos: 800_000,
+      cashExpensesCentavos: 150_000,
+      netRevenueCentavos: 1_050_000,
+      expectedRemainingCashCentavos: 650_000,
+    });
+    expect(report.paymentMethods).toEqual(
+      expect.arrayContaining([
+        { method: PaymentMethod.CARD, count: 1, amountCentavos: 200_000 },
+        { method: PaymentMethod.GCASH, count: 1, amountCentavos: 200_000 },
+      ]),
+    );
+    expect(report.expenses[0]).toEqual(
+      expect.objectContaining({ reason: 'Cleaning materials' }),
     );
   });
 

@@ -98,6 +98,7 @@ test('calculates store, extra-charge, payment, product, and staff totals', async
   expect(report.paymentMethods).toEqual([
     { method: PaymentMethod.CASH, count: 1, amountCentavos: 5_000 },
     { method: PaymentMethod.GCASH, count: 1, amountCentavos: 5_000 },
+    { method: PaymentMethod.CARD, count: 0, amountCentavos: 0 },
   ]);
   expect(report.products[0]).toMatchObject({
     name: 'Bottled Water',
@@ -129,4 +130,42 @@ test('calculates store, extra-charge, payment, product, and staff totals', async
   expect(gcashReport.products).toHaveLength(1);
   expect(gcashReport.products[0]?.name).toBe('Extra Pillow');
   expect(gcashReport.activity).toHaveLength(1);
+
+  const cardSale = {
+    ...sales[0]!,
+    id: 3,
+    paymentMethod: PaymentMethod.CARD,
+    totalAmountCentavos: 7_500,
+    items: [
+      {
+        ...sales[0]!.items[0]!,
+        quantity: 3,
+        lineTotalCentavos: 7_500,
+      },
+    ],
+  };
+  const cardTransaction = {
+    ...transactions[0]!,
+    paymentMethod: PaymentMethod.CARD,
+    amountCentavos: 7_500,
+  };
+  vi.mocked(prisma.storeSale.findMany).mockResolvedValue([
+    ...sales,
+    cardSale,
+  ] as never);
+  vi.mocked(prisma.financialTransaction.findMany).mockResolvedValue([
+    ...transactions,
+    cardTransaction,
+  ] as never);
+  const cardReport = await buildStoreReport(prisma, {
+    preset: 'specific_date',
+    shift: 'ALL',
+    date: '2026-08-11',
+    paymentMethod: PaymentMethod.CARD,
+    now: new Date('2026-08-11T04:00:00.000Z'),
+  });
+  expect(cardReport.paymentMethods).toEqual([
+    { method: PaymentMethod.CARD, count: 1, amountCentavos: 7_500 },
+  ]);
+  expect(cardReport.summary.totalRevenueCentavos).toBe(7_500);
 });

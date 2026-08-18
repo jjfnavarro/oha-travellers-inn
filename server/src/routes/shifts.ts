@@ -1,10 +1,56 @@
-import { type PrismaClient } from '@prisma/client';
+import {
+  FinancialTransactionType,
+  PaymentMethod,
+  type PrismaClient,
+} from '@prisma/client';
 import { Router } from 'express';
 import { getShiftWindow } from '../services/shift-time.js';
 
 const shiftInclude = {
   _count: { select: { stays: true } },
 };
+
+const revenueTypes = new Set<FinancialTransactionType>([
+  FinancialTransactionType.ROOM_CHARGE,
+  FinancialTransactionType.EXTENSION_CHARGE,
+  FinancialTransactionType.STORE_SALE,
+  FinancialTransactionType.EXTRA_CHARGE,
+]);
+
+type ShiftTransaction = {
+  amountCentavos: number;
+  transactionType: FinancialTransactionType;
+  paymentMethod: PaymentMethod;
+};
+
+function shiftFinancials(transactions: ShiftTransaction[]) {
+  const grossRevenueCentavos = transactions
+    .filter((item) => revenueTypes.has(item.transactionType))
+    .reduce((sum, item) => sum + item.amountCentavos, 0);
+  const cashRevenueCentavos = transactions
+    .filter(
+      (item) =>
+        revenueTypes.has(item.transactionType) &&
+        item.paymentMethod === PaymentMethod.CASH,
+    )
+    .reduce((sum, item) => sum + item.amountCentavos, 0);
+  const cashExpensesCentavos = transactions.reduce((sum, item) => {
+    if (item.transactionType === FinancialTransactionType.EXPENSE) {
+      return sum + item.amountCentavos;
+    }
+    if (item.transactionType === FinancialTransactionType.EXPENSE_REVERSAL) {
+      return sum - item.amountCentavos;
+    }
+    return sum;
+  }, 0);
+  return {
+    totalAmountCentavos: grossRevenueCentavos,
+    grossRevenueCentavos,
+    cashExpensesCentavos,
+    netRevenueCentavos: grossRevenueCentavos - cashExpensesCentavos,
+    expectedRemainingCashCentavos: cashRevenueCentavos - cashExpensesCentavos,
+  };
+}
 
 export function createShiftsRouter(prisma: PrismaClient): Router {
   const router = Router();
@@ -17,14 +63,18 @@ export function createShiftsRouter(prisma: PrismaClient): Router {
       create: window,
       include: shiftInclude,
     });
-    const transactions = await prisma.financialTransaction.aggregate({
+    const transactions = await prisma.financialTransaction.findMany({
       where: { createdAt: { gte: shift.startsAt, lt: shift.endsAt } },
-      _sum: { amountCentavos: true },
+      select: {
+        amountCentavos: true,
+        transactionType: true,
+        paymentMethod: true,
+      },
     });
     response.json({
       data: {
         ...shift,
-        totalAmountCentavos: transactions._sum.amountCentavos ?? 0,
+        ...shiftFinancials(transactions),
       },
     });
   });
@@ -45,20 +95,24 @@ export function createShiftsRouter(prisma: PrismaClient): Router {
                 lt: shifts[0]!.endsAt,
               },
             },
-            select: { amountCentavos: true, createdAt: true },
+            select: {
+              amountCentavos: true,
+              transactionType: true,
+              paymentMethod: true,
+              createdAt: true,
+            },
           });
-    const totals = new Map<number, number>();
+    const totals = new Map<number, ShiftTransaction[]>();
     for (const transaction of transactions) {
       const startsAt = getShiftWindow(transaction.createdAt).startsAt.getTime();
-      totals.set(
-        startsAt,
-        (totals.get(startsAt) ?? 0) + transaction.amountCentavos,
-      );
+      const list = totals.get(startsAt) ?? [];
+      list.push(transaction);
+      totals.set(startsAt, list);
     }
     response.json({
       data: shifts.map((shift) => ({
         ...shift,
-        totalAmountCentavos: totals.get(shift.startsAt.getTime()) ?? 0,
+        ...shiftFinancials(totals.get(shift.startsAt.getTime()) ?? []),
       })),
     });
   });

@@ -20,12 +20,12 @@ export async function buildStoreReport(
   const timestampRange = { gte: window.startsAt, lt: window.endsAt };
   const selectedStaff = options.staffId
     ? await prisma.staffAccount.findFirst({
-        where: { id: options.staffId, isActive: true },
+        where: { id: options.staffId },
         select: { id: true, username: true, role: true },
       })
     : null;
   if (options.staffId && !selectedStaff) {
-    throw new Error('The selected active staff account was not found.');
+    throw new Error('The selected staff account was not found.');
   }
 
   const [sales, transactions] = await Promise.all([
@@ -147,7 +147,11 @@ export async function buildStoreReport(
     selectedTransactions,
     window.startsAt,
     window.endsAt,
-    ['week', 'month', 'custom'].includes(options.preset) ? 'DAY' : 'HOUR',
+    options.preset === 'year'
+      ? 'MONTH'
+      : ['week', 'month', 'custom'].includes(options.preset)
+        ? 'DAY'
+        : 'HOUR',
   );
   return {
     generatedAt: now,
@@ -176,7 +180,7 @@ export async function buildStoreReport(
     revenueTrend,
     paymentMethods: (options.paymentMethod
       ? [options.paymentMethod]
-      : [PaymentMethod.CASH, PaymentMethod.GCASH]
+      : [PaymentMethod.CASH, PaymentMethod.GCASH, PaymentMethod.CARD]
     ).map((method) => {
       const matching = selectedTransactions.filter(
         (transaction) => transaction.paymentMethod === method,

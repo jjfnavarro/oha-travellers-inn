@@ -23,12 +23,13 @@ const ownerReportQuerySchema = z.object({
       'specific_date',
       'week',
       'month',
+      'year',
       'custom',
     ])
     .default('today'),
   shift: z.enum(['ALL', 'DAY', 'NIGHT']).default('ALL'),
   scope: z.enum(['OVERALL', 'ROOMS']).default('OVERALL'),
-  paymentMethod: z.enum(['CASH', 'GCASH']).optional(),
+  paymentMethod: z.enum(['CASH', 'GCASH', 'CARD']).optional(),
   date: z
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/)
@@ -115,8 +116,34 @@ async function createOwnerPdf(report: OwnerReport): Promise<Buffer> {
   }
   document
     .text(`Gross revenue: ${money(report.financial.grossRevenueCentavos)}`)
+    .text(`Cash revenue: ${money(report.financial.cashRevenueCentavos)}`)
+    .text(`Cash expenses: ${money(report.financial.cashExpensesCentavos)}`)
     .text(`Net revenue: ${money(report.financial.netRevenueCentavos)}`)
+    .text(
+      `Expected remaining cash: ${money(report.financial.expectedRemainingCashCentavos)}`,
+    )
     .text(`Total collected: ${money(report.financial.totalCollectedCentavos)}`);
+  document.moveDown();
+  document.fontSize(11).text('Payment methods', { underline: true });
+  for (const item of report.paymentMethods) {
+    document
+      .fontSize(9)
+      .text(
+        `${item.method}: ${item.count} transactions - ${money(item.amountCentavos)}`,
+      );
+  }
+  if (report.filters.scope === 'OVERALL') {
+    document.moveDown();
+    document.fontSize(11).text('Expenses', { underline: true });
+    for (const expense of report.expenses) {
+      addPageWhenNeeded(30);
+      document
+        .fontSize(9)
+        .text(
+          `${expense.createdAt.toISOString()} - ${expense.recordedBy.username} - ${expense.reason} - ${money(expense.amountCentavos)} - ${expense.status}`,
+        );
+    }
+  }
   document.moveDown();
   drawRevenueCharts(document, report.revenueTrend, [
     {
@@ -150,7 +177,7 @@ async function createOwnerPdf(report: OwnerReport): Promise<Buffer> {
     document
       .fontSize(9)
       .text(
-        `${item.durationHours} hours: ${item.count} check-ins - ${money(item.revenueCentavos)}`,
+        `${item.numberOfDays ? `${item.numberOfDays} ${item.numberOfDays === 1 ? 'day' : 'days'} (${item.durationHours} hours)` : `${item.durationHours} hours`}: ${item.count} check-ins - ${money(item.revenueCentavos)}`,
       );
   }
   document.moveDown();
@@ -264,6 +291,51 @@ async function createOwnerWorkbook(report: OwnerReport): Promise<Buffer> {
       { value: 'Net revenue' },
       { value: report.financial.netRevenueCentavos / 100, format: '₱#,##0.00' },
     ],
+    [
+      { value: 'Cash revenue' },
+      {
+        value: report.financial.cashRevenueCentavos / 100,
+        format: '₱#,##0.00',
+      },
+    ],
+    [
+      { value: 'Cash expenses' },
+      {
+        value: report.financial.cashExpensesCentavos / 100,
+        format: '₱#,##0.00',
+      },
+    ],
+    [
+      { value: 'Expected remaining cash' },
+      {
+        value: report.financial.expectedRemainingCashCentavos / 100,
+        format: '₱#,##0.00',
+      },
+    ],
+    [],
+    [header('Payment method'), header('Transactions'), header('Revenue')],
+    ...report.paymentMethods.map((item) => [
+      { value: item.method },
+      { value: item.count },
+      { value: item.amountCentavos / 100, format: '₱#,##0.00' },
+    ]),
+    [],
+    [
+      header('Expense time'),
+      header('Reason'),
+      header('Amount'),
+      header('Recorded by'),
+      header('Shift'),
+      header('Status'),
+    ],
+    ...report.expenses.map((expense) => [
+      { value: expense.createdAt, format: 'yyyy-mm-dd hh:mm' },
+      { value: expense.reason },
+      { value: expense.amountCentavos / 100, format: '₱#,##0.00' },
+      { value: expense.recordedBy.username },
+      { value: expense.shift.type },
+      { value: expense.status },
+    ]),
     [],
     [
       header('Trend period'),
@@ -284,7 +356,11 @@ async function createOwnerWorkbook(report: OwnerReport): Promise<Buffer> {
     [],
     [header('Package'), header('Check-ins'), header('Revenue')],
     ...report.packages.map((item) => [
-      { value: `${item.durationHours} hours` },
+      {
+        value: item.numberOfDays
+          ? `${item.numberOfDays} ${item.numberOfDays === 1 ? 'day' : 'days'} (${item.durationHours} hours)`
+          : `${item.durationHours} hours`,
+      },
       { value: item.count },
       { value: item.revenueCentavos / 100, format: '₱#,##0.00' },
     ]),

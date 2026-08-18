@@ -18,7 +18,9 @@ import {
   LogOut,
   PanelLeftClose,
   PanelLeftOpen,
+  Pencil,
   ShoppingBasket,
+  ReceiptText,
   Users,
 } from 'lucide-react';
 import { getOccupancyStatus, type OccupancyStatus } from './stay-status';
@@ -29,6 +31,7 @@ import { resolveHistoryWindow, type HistoryPeriod } from './history-period';
 import { MiniStoreView } from './MiniStoreView';
 import type { RevenueTrendPoint } from './RevenueCharts';
 import { StoreReportView } from './StoreReportView';
+import { ExpensesView } from './ExpensesView';
 
 const RevenueCharts = lazy(() =>
   import('./RevenueCharts').then((module) => ({
@@ -42,6 +45,7 @@ type View =
   | 'rooms'
   | 'bookings'
   | 'store'
+  | 'expenses'
   | 'history'
   | 'reports'
   | 'shifts'
@@ -105,6 +109,8 @@ interface Stay {
   guestName: string | null;
   plateNumber: string | null;
   durationHours: number;
+  numberOfDays?: number | null;
+  rateAmountCentavos?: number | null;
   paidAmountCentavos: number;
   checkedInAt: string;
   expectedCheckoutAt: string;
@@ -115,7 +121,7 @@ interface StayExtension {
   id: number;
   durationHours: number;
   amountCentavos: number;
-  paymentMethod: 'CASH' | 'GCASH' | 'UNKNOWN';
+  paymentMethod: 'CASH' | 'GCASH' | 'CARD' | 'UNKNOWN';
   createdAt: string;
 }
 
@@ -128,7 +134,7 @@ interface HistoryStay extends Stay {
   checkedOutBy: { id: number; username: string } | null;
   storeSales: {
     id: number;
-    paymentMethod: 'CASH' | 'GCASH';
+    paymentMethod: 'CASH' | 'GCASH' | 'CARD';
     totalAmountCentavos: number;
     createdAt: string;
     handledBy: { id: number; username: string };
@@ -159,7 +165,7 @@ function formatMoney(centavos: number): string {
 
 function statusLabel(status: OperationalStatus): string {
   if (status === 'ACTIVE') return 'Available';
-  if (status === 'INACTIVE') return 'Out of service';
+  if (status === 'INACTIVE') return 'Archived';
   return status.charAt(0) + status.slice(1).toLowerCase();
 }
 
@@ -192,6 +198,7 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showAddRoom, setShowAddRoom] = useState(false);
+  const [editRoom, setEditRoom] = useState<Room | null>(null);
   const [checkInRoom, setCheckInRoom] = useState<Room | null>(null);
   const [extendRoom, setExtendRoom] = useState<Room | null>(null);
   const [now, setNow] = useState(Date.now());
@@ -553,6 +560,14 @@ export default function App() {
           <ShoppingBasket size={20} />
           <span>Store</span>
         </button>
+        <button
+          className={view === 'expenses' ? 'active' : ''}
+          onClick={() => selectView('expenses')}
+          title="Expenses"
+        >
+          <ReceiptText size={20} />
+          <span>Expenses</span>
+        </button>
         {user.role === 'OWNER' && (
           <button
             className={view === 'reports' ? 'active' : ''}
@@ -728,7 +743,28 @@ export default function App() {
                     >
                       <div className="room-card-top">
                         <span>Room</span>
-                        <strong>{room.number}</strong>
+                        <div>
+                          <strong
+                            className={
+                              room.number.length > 8
+                                ? 'long-room-number'
+                                : undefined
+                            }
+                          >
+                            {room.number}
+                          </strong>
+                          {user.role === 'OWNER' && (
+                            <button
+                              className="icon-button compact-icon-button"
+                              type="button"
+                              aria-label={`Manage room ${room.number}`}
+                              title="Manage room"
+                              onClick={() => setEditRoom(room)}
+                            >
+                              <Pencil size={15} />
+                            </button>
+                          )}
+                        </div>
                       </div>
                       <p className="room-type">{room.roomType.name}</p>
                       {room.operationalStatus === 'ACTIVE' && (
@@ -799,7 +835,9 @@ export default function App() {
                           <option value="ACTIVE">Available</option>
                           <option value="CLEANING">Cleaning</option>
                           <option value="MAINTENANCE">Maintenance</option>
-                          <option value="INACTIVE">Out of service</option>
+                          {user.role === 'OWNER' && (
+                            <option value="INACTIVE">Archived</option>
+                          )}
                         </select>
                       </label>
                     </article>
@@ -821,6 +859,8 @@ export default function App() {
           <BookingsView rooms={rooms} onStayCreated={loadInventory} />
         ) : view === 'store' ? (
           <MiniStoreView isOwner={user.role === 'OWNER'} rooms={rooms} />
+        ) : view === 'expenses' ? (
+          <ExpensesView isOwner={user.role === 'OWNER'} />
         ) : view === 'reports' ? (
           <ReportsView />
         ) : view === 'shifts' ? (
@@ -844,6 +884,17 @@ export default function App() {
               ),
             );
             setShowAddRoom(false);
+          }}
+        />
+      )}
+      {editRoom && user.role === 'OWNER' && (
+        <EditRoomDialog
+          room={editRoom}
+          roomTypes={roomTypes}
+          onClose={() => setEditRoom(null)}
+          onSaved={async () => {
+            setEditRoom(null);
+            await loadInventory();
           }}
         />
       )}
@@ -914,6 +965,23 @@ function RatesView({
     ),
   );
   const [savingRoomId, setSavingRoomId] = useState<number | null>(null);
+  const [editingRoom, setEditingRoom] = useState<Room | null>(null);
+
+  useEffect(() => {
+    setRoomDrafts(
+      Object.fromEntries(
+        rooms.map((room) => [
+          room.id,
+          Object.fromEntries(
+            (room.rateOverrides ?? []).map((rate) => [
+              rate.durationHours,
+              String(rate.amountCentavos / 100),
+            ]),
+          ),
+        ]),
+      ),
+    );
+  }, [rooms]);
 
   async function saveRates(roomType: RoomType): Promise<void> {
     const draft = drafts[roomType.id] ?? {};
@@ -1134,19 +1202,41 @@ function RatesView({
                   );
                 })}
                 <td>
-                  <button
-                    className="secondary-button"
-                    disabled={savingRoomId === room.id}
-                    onClick={() => void saveRoomRates(room)}
-                  >
-                    {savingRoomId === room.id ? 'Saving...' : 'Save'}
-                  </button>
+                  <div className="rate-room-actions">
+                    <button
+                      className="secondary-button"
+                      type="button"
+                      onClick={() => setEditingRoom(room)}
+                    >
+                      <Pencil size={15} aria-hidden="true" />
+                      Edit details
+                    </button>
+                    <button
+                      className="secondary-button"
+                      type="button"
+                      disabled={savingRoomId === room.id}
+                      onClick={() => void saveRoomRates(room)}
+                    >
+                      {savingRoomId === room.id ? 'Saving...' : 'Save rates'}
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+      {editingRoom && (
+        <EditRoomDialog
+          room={editingRoom}
+          roomTypes={roomTypes}
+          onClose={() => setEditingRoom(null)}
+          onSaved={async () => {
+            setEditingRoom(null);
+            await onUpdated();
+          }}
+        />
+      )}
     </>
   );
 }
@@ -1614,7 +1704,9 @@ function HistoryView({
                       : 'Active'}
                   </td>
                   <td>
-                    {stay.durationHours} hours
+                    {stay.numberOfDays
+                      ? `${stay.numberOfDays} ${stay.numberOfDays === 1 ? 'day' : 'days'} (${stay.durationHours} hours)`
+                      : `${stay.durationHours} hours`}
                     <small>{stay.shift?.type ?? ''} shift</small>
                   </td>
                   <td>
@@ -1645,7 +1737,9 @@ function HistoryView({
                               {formatMoney(sale.totalAmountCentavos)} ·{' '}
                               {sale.paymentMethod === 'GCASH'
                                 ? 'GCash'
-                                : 'Cash'}
+                                : sale.paymentMethod === 'CARD'
+                                  ? 'Card'
+                                  : 'Cash'}
                             </small>
                             <small>
                               {sale.handledBy.username} ·{' '}
@@ -1682,10 +1776,11 @@ type OwnerReportPreset =
   | 'specific_date'
   | 'week'
   | 'month'
+  | 'year'
   | 'custom';
 type OwnerReportShift = 'ALL' | 'DAY' | 'NIGHT';
 type ReportCategory = 'OVERALL' | 'ROOMS' | 'STORE';
-type ReportPaymentMethod = 'ALL' | 'CASH' | 'GCASH';
+type ReportPaymentMethod = 'ALL' | 'CASH' | 'GCASH' | 'CARD';
 
 interface OwnerReportResponse {
   generatedAt: string;
@@ -1715,12 +1810,18 @@ interface OwnerReportResponse {
     storeRevenueCentavos: number;
     extraChargesRevenueCentavos: number;
     grossRevenueCentavos: number;
+    cashRevenueCentavos: number;
+    cashExpensesCentavos: number;
+    expenseCount: number;
+    expenseReversalCount: number;
     netRevenueCentavos: number;
+    expectedRemainingCashCentavos: number;
     totalCollectedCentavos: number;
   };
   revenueTrend: RevenueTrendPoint[];
   packages: {
     durationHours: number;
+    numberOfDays: number | null;
     count: number;
     revenueCentavos: number;
   }[];
@@ -1731,9 +1832,22 @@ interface OwnerReportResponse {
     uses: number;
   }[];
   paymentMethods: {
-    method: 'CASH' | 'GCASH' | 'UNKNOWN';
+    method: 'CASH' | 'GCASH' | 'CARD' | 'UNKNOWN';
     count: number;
     amountCentavos: number;
+  }[];
+  expenses: {
+    id: number;
+    amountCentavos: number;
+    reason: string;
+    status: 'ACTIVE' | 'VOIDED';
+    businessDate: string;
+    createdAt: string;
+    recordedBy: { id: number; username: string };
+    shift: { id: number; type: 'DAY' | 'NIGHT' };
+    voidedAt: string | null;
+    voidReason: string | null;
+    voidedBy: { id: number; username: string } | null;
   }[];
   vehicleTypes: { type: VehicleType; count: number }[];
   activity: {
@@ -1795,9 +1909,8 @@ function ReportsView() {
   useEffect(() => {
     apiRequest<ApiCollection<StaffRecord>>('/staff')
       .then((response) => {
-        const activeStaff = response.data.filter((account) => account.isActive);
-        setStaff(activeStaff);
-        setStaffId((current) => current || String(activeStaff[0]?.id ?? ''));
+        setStaff(response.data);
+        setStaffId((current) => current || String(response.data[0]?.id ?? ''));
       })
       .catch((error: unknown) =>
         setMessage(
@@ -1810,7 +1923,7 @@ function ReportsView() {
 
   const query = useMemo(() => {
     const parameters = new URLSearchParams({ preset, shift });
-    if (['specific_date', 'week', 'month'].includes(preset)) {
+    if (['specific_date', 'week', 'month', 'year'].includes(preset)) {
       parameters.set('date', date);
     }
     if (preset === 'custom') {
@@ -1922,10 +2035,11 @@ function ReportsView() {
             <option value="specific_date">Specific date</option>
             <option value="week">This week</option>
             <option value="month">This month</option>
+            <option value="year">This year</option>
             <option value="custom">Custom date range</option>
           </select>
         </label>
-        {['specific_date', 'week', 'month'].includes(preset) && (
+        {['specific_date', 'week', 'month', 'year'].includes(preset) && (
           <label>
             Reference date
             <input
@@ -1980,6 +2094,7 @@ function ReportsView() {
             <option value="ALL">All payments</option>
             <option value="CASH">Cash</option>
             <option value="GCASH">GCash</option>
+            <option value="CARD">Card</option>
           </select>
         </label>
         <fieldset className="period-control report-view-control">
@@ -2029,7 +2144,7 @@ function ReportsView() {
             <div>
               <span>
                 {reportCategory === 'OVERALL'
-                  ? 'Total revenue'
+                  ? 'Gross revenue'
                   : 'Room revenue'}
               </span>
               <strong>
@@ -2038,6 +2153,26 @@ function ReportsView() {
             </div>
             {reportCategory === 'OVERALL' && (
               <>
+                <div>
+                  <span>Cash expenses</span>
+                  <strong>
+                    {formatMoney(report.financial.cashExpensesCentavos)}
+                  </strong>
+                </div>
+                <div>
+                  <span>Net revenue</span>
+                  <strong>
+                    {formatMoney(report.financial.netRevenueCentavos)}
+                  </strong>
+                </div>
+                <div>
+                  <span>Expected remaining cash</span>
+                  <strong>
+                    {formatMoney(
+                      report.financial.expectedRemainingCashCentavos,
+                    )}
+                  </strong>
+                </div>
                 <div>
                   <span>Room revenue</span>
                   <strong>
@@ -2129,6 +2264,25 @@ function ReportsView() {
                       },
                     ]
               }
+              paymentBreakdown={report.paymentMethods.map((item) => ({
+                name:
+                  item.method === 'GCASH'
+                    ? 'GCash'
+                    : item.method === 'CARD'
+                      ? 'Card'
+                      : item.method === 'CASH'
+                        ? 'Cash'
+                        : 'Legacy',
+                amountCentavos: item.amountCentavos,
+                color:
+                  item.method === 'CASH'
+                    ? '#1c1c1c'
+                    : item.method === 'GCASH'
+                      ? '#18823b'
+                      : item.method === 'CARD'
+                        ? '#9a5b13'
+                        : '#777777',
+              }))}
             />
           </Suspense>
 
@@ -2163,6 +2317,35 @@ function ReportsView() {
                           <td>
                             {formatMoney(
                               report.financial.extraChargesRevenueCentavos,
+                            )}
+                          </td>
+                        </tr>
+                        <tr>
+                          <th>Gross revenue</th>
+                          <td>
+                            {formatMoney(report.financial.grossRevenueCentavos)}
+                          </td>
+                        </tr>
+                        <tr>
+                          <th>Cash expenses</th>
+                          <td>
+                            -
+                            {formatMoney(report.financial.cashExpensesCentavos)}
+                          </td>
+                        </tr>
+                        <tr>
+                          <th>Net revenue</th>
+                          <td>
+                            <strong>
+                              {formatMoney(report.financial.netRevenueCentavos)}
+                            </strong>
+                          </td>
+                        </tr>
+                        <tr>
+                          <th>Expected remaining cash</th>
+                          <td>
+                            {formatMoney(
+                              report.financial.expectedRemainingCashCentavos,
                             )}
                           </td>
                         </tr>
@@ -2203,6 +2386,46 @@ function ReportsView() {
             </section>
           </div>
 
+          {reportCategory === 'OVERALL' && (
+            <section className="report-expenses">
+              <h3>Expenses</h3>
+              {(report.expenses ?? []).length === 0 ? (
+                <p className="empty-state">No Cash expenses for this period.</p>
+              ) : (
+                <div className="data-table-wrap">
+                  <table className="data-table compact-report-table">
+                    <thead>
+                      <tr>
+                        <th>Date and time</th>
+                        <th>Reason</th>
+                        <th>Recorded by</th>
+                        <th>Shift</th>
+                        <th>Amount</th>
+                        <th>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(report.expenses ?? []).map((expense) => (
+                        <tr key={expense.id}>
+                          <td>{formatDateTime(expense.createdAt)}</td>
+                          <td>{expense.reason}</td>
+                          <td>{expense.recordedBy.username}</td>
+                          <td>
+                            {expense.shift.type === 'DAY' ? 'Day' : 'Night'}
+                          </td>
+                          <td>{formatMoney(expense.amountCentavos)}</td>
+                          <td>
+                            {expense.status === 'ACTIVE' ? 'Active' : 'Voided'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </section>
+          )}
+
           <h3>Package breakdown</h3>
           <div className="data-table-wrap">
             <table className="data-table compact-report-table">
@@ -2215,8 +2438,14 @@ function ReportsView() {
               </thead>
               <tbody>
                 {report.packages.map((item) => (
-                  <tr key={item.durationHours}>
-                    <td>{item.durationHours} hours</td>
+                  <tr
+                    key={`${item.numberOfDays === null ? 'hours' : `days-${item.numberOfDays}`}-${item.durationHours}`}
+                  >
+                    <td>
+                      {item.numberOfDays
+                        ? `${item.numberOfDays} ${item.numberOfDays === 1 ? 'day' : 'days'} (${item.durationHours} hours)`
+                        : `${item.durationHours} hours`}
+                    </td>
                     <td>{item.count}</td>
                     <td>{formatMoney(item.revenueCentavos)}</td>
                   </tr>
@@ -2270,9 +2499,11 @@ function ReportsView() {
                         <td>
                           {item.method === 'GCASH'
                             ? 'GCash'
-                            : item.method === 'CASH'
-                              ? 'Cash'
-                              : 'Legacy / unknown'}
+                            : item.method === 'CARD'
+                              ? 'Card'
+                              : item.method === 'CASH'
+                                ? 'Cash'
+                                : 'Legacy / unknown'}
                         </td>
                         <td>{item.count}</td>
                         <td>{formatMoney(item.amountCentavos)}</td>
@@ -2452,6 +2683,7 @@ function CheckInDialog({
   const [durationHours, setDurationHours] = useState(
     String(roomRates[0]?.durationHours ?? ''),
   );
+  const [numberOfDays, setNumberOfDays] = useState('1');
   const [arrivalType, setArrivalType] = useState<'VEHICLE' | 'WALK_IN'>(
     'VEHICLE',
   );
@@ -2459,12 +2691,26 @@ function CheckInDialog({
   const [guestName, setGuestName] = useState('');
   const [plateNumber, setPlateNumber] = useState('');
   const [notes, setNotes] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState<'CASH' | 'GCASH'>('CASH');
+  const [paymentMethod, setPaymentMethod] = useState<'CASH' | 'GCASH' | 'CARD'>(
+    'CASH',
+  );
   const [message, setMessage] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const selectedRate = roomRates.find(
     (rate) => rate.durationHours === Number(durationHours),
   );
+  const dayRate = roomRates.find((rate) => rate.durationHours === 24);
+  const parsedDays = Number(numberOfDays);
+  const daysAreValid =
+    Number.isInteger(parsedDays) && parsedDays >= 1 && parsedDays <= 365;
+  const isDays = durationHours === 'DAYS';
+  const totalHours =
+    isDays && daysAreValid ? parsedDays * 24 : Number(durationHours);
+  const totalAmountCentavos = isDays
+    ? daysAreValid && dayRate
+      ? parsedDays * dayRate.amountCentavos
+      : null
+    : (selectedRate?.amountCentavos ?? null);
 
   async function submit(event: FormEvent): Promise<void> {
     event.preventDefault();
@@ -2475,7 +2721,9 @@ function CheckInDialog({
         method: 'POST',
         body: JSON.stringify({
           roomId: room.id,
-          durationHours: Number(durationHours),
+          ...(isDays
+            ? { numberOfDays: parsedDays }
+            : { durationHours: Number(durationHours) }),
           arrivalType,
           vehicleType: arrivalType === 'VEHICLE' ? vehicleType : null,
           guestName,
@@ -2558,8 +2806,42 @@ function CheckInDialog({
                   {formatMoney(rate.amountCentavos)}
                 </option>
               ))}
+              {dayRate && <option value="DAYS">Days</option>}
             </select>
           </label>
+          {isDays && (
+            <>
+              <label>
+                Number of days
+                <input
+                  required
+                  type="number"
+                  min={1}
+                  max={365}
+                  step={1}
+                  inputMode="numeric"
+                  value={numberOfDays}
+                  onChange={(event) => setNumberOfDays(event.target.value)}
+                />
+              </label>
+              {daysAreValid && dayRate && (
+                <div className="stay-calculation" aria-live="polite">
+                  <span>Total duration: {totalHours} hours</span>
+                  <span>
+                    24-hour rate: {formatMoney(dayRate.amountCentavos)}
+                  </span>
+                  <span>
+                    Checkout:{' '}
+                    {formatDateTime(
+                      new Date(
+                        Date.now() + totalHours * 60 * 60 * 1000,
+                      ).toISOString(),
+                    )}
+                  </span>
+                </div>
+              )}
+            </>
+          )}
           <label>
             Guest name <span className="optional">Optional</span>
             <input
@@ -2623,13 +2905,20 @@ function CheckInDialog({
               >
                 GCash
               </button>
+              <button
+                type="button"
+                className={paymentMethod === 'CARD' ? 'active' : ''}
+                onClick={() => setPaymentMethod('CARD')}
+              >
+                Card
+              </button>
             </div>
           </fieldset>
           <div className="payment-summary">
             <span>Payment at check-in</span>
             <strong>
-              {selectedRate
-                ? formatMoney(selectedRate.amountCentavos)
+              {totalAmountCentavos !== null
+                ? formatMoney(totalAmountCentavos)
                 : 'Select a rate'}
             </strong>
             <small>Early checkout does not change this amount.</small>
@@ -2646,7 +2935,7 @@ function CheckInDialog({
             <button
               type="submit"
               className="primary-button"
-              disabled={saving || !selectedRate}
+              disabled={saving || totalAmountCentavos === null}
             >
               {saving ? 'Checking in...' : 'Confirm check-in'}
             </button>
@@ -2672,7 +2961,9 @@ function ExtendStayDialog({
   const [durationHours, setDurationHours] = useState(
     String(roomRates[0]?.durationHours ?? ''),
   );
-  const [paymentMethod, setPaymentMethod] = useState<'CASH' | 'GCASH'>('CASH');
+  const [paymentMethod, setPaymentMethod] = useState<'CASH' | 'GCASH' | 'CARD'>(
+    'CASH',
+  );
   const [message, setMessage] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const selectedRate = roomRates.find(
@@ -2764,6 +3055,13 @@ function ExtendStayDialog({
                 onClick={() => setPaymentMethod('GCASH')}
               >
                 GCash
+              </button>
+              <button
+                type="button"
+                className={paymentMethod === 'CARD' ? 'active' : ''}
+                onClick={() => setPaymentMethod('CARD')}
+              >
+                Card
               </button>
             </div>
           </fieldset>
@@ -2872,11 +3170,11 @@ function AddRoomDialog({
         </div>
         <form onSubmit={(event) => void submit(event)}>
           <label>
-            Room number
+            Room name or number
             <input
               autoFocus
               required
-              maxLength={10}
+              maxLength={30}
               value={number}
               onChange={(event) => setNumber(event.target.value)}
             />
@@ -2905,6 +3203,174 @@ function AddRoomDialog({
             </button>
             <button type="submit" className="primary-button" disabled={saving}>
               {saving ? 'Adding...' : 'Add room'}
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
+  );
+}
+
+function EditRoomDialog({
+  room,
+  roomTypes,
+  onClose,
+  onSaved,
+}: {
+  room: Room;
+  roomTypes: RoomType[];
+  onClose: () => void;
+  onSaved: () => Promise<void>;
+}) {
+  const [number, setNumber] = useState(room.number);
+  const [roomTypeId, setRoomTypeId] = useState(String(room.roomTypeId));
+  const [displayOrder, setDisplayOrder] = useState(String(room.displayOrder));
+  const [operationalStatus, setOperationalStatus] = useState<OperationalStatus>(
+    room.operationalStatus,
+  );
+  const [message, setMessage] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  async function save(event: FormEvent): Promise<void> {
+    event.preventDefault();
+    setSaving(true);
+    setMessage(null);
+    try {
+      await apiRequest(`/rooms/${room.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          number,
+          roomTypeId: Number(roomTypeId),
+          displayOrder: Number(displayOrder),
+          operationalStatus,
+        }),
+      });
+      await onSaved();
+    } catch (error: unknown) {
+      setMessage(
+        error instanceof Error ? error.message : 'Room could not be updated.',
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function permanentlyDelete(): Promise<void> {
+    if (
+      !window.confirm(
+        `Permanently delete Room ${room.number}?\n\nThis is only allowed when the room has never been used. This cannot be undone.`,
+      )
+    ) {
+      return;
+    }
+    setSaving(true);
+    setMessage(null);
+    try {
+      await apiRequest(`/rooms/${room.id}`, { method: 'DELETE' });
+      await onSaved();
+    } catch (error: unknown) {
+      setMessage(
+        error instanceof Error ? error.message : 'Room could not be deleted.',
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="dialog-backdrop" role="presentation">
+      <section
+        className="dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="edit-room-title"
+      >
+        <div className="dialog-header">
+          <div>
+            <p className="dialog-eyebrow">Room management</p>
+            <h2 id="edit-room-title">Edit Room {room.number}</h2>
+          </div>
+          <button
+            className="icon-button"
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </div>
+        <form onSubmit={(event) => void save(event)}>
+          <label>
+            Room name or number
+            <input
+              required
+              maxLength={30}
+              value={number}
+              onChange={(event) => setNumber(event.target.value)}
+            />
+          </label>
+          <label>
+            Room type
+            <select
+              value={roomTypeId}
+              onChange={(event) => setRoomTypeId(event.target.value)}
+            >
+              {roomTypes.map((type) => (
+                <option key={type.id} value={type.id}>
+                  {type.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Display order
+            <input
+              required
+              type="number"
+              min={1}
+              step={1}
+              inputMode="numeric"
+              value={displayOrder}
+              onChange={(event) => setDisplayOrder(event.target.value)}
+            />
+          </label>
+          <label>
+            Room status
+            <select
+              value={operationalStatus}
+              onChange={(event) =>
+                setOperationalStatus(event.target.value as OperationalStatus)
+              }
+            >
+              <option value="ACTIVE">Available</option>
+              <option value="CLEANING">Cleaning</option>
+              <option value="MAINTENANCE">Maintenance</option>
+              <option value="INACTIVE">Archived</option>
+            </select>
+          </label>
+          <p className="form-help">
+            Name and room-type changes also update the room label shown in
+            linked history. Previously charged amounts remain unchanged.
+          </p>
+          {message && <p className="form-error">{message}</p>}
+          <div className="dialog-actions split-actions">
+            <button
+              className="danger-button"
+              type="button"
+              disabled={saving}
+              onClick={() => void permanentlyDelete()}
+            >
+              Permanently delete
+            </button>
+            <button
+              className="secondary-button"
+              type="button"
+              onClick={onClose}
+            >
+              Cancel
+            </button>
+            <button className="primary-button" type="submit" disabled={saving}>
+              {saving ? 'Saving...' : 'Save changes'}
             </button>
           </div>
         </form>

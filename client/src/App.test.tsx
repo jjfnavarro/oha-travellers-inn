@@ -163,7 +163,12 @@ test('shows Owner reporting controls and financial transaction totals', async ()
       storeRevenueCentavos: 0,
       extraChargesRevenueCentavos: 0,
       grossRevenueCentavos: 100_000,
+      cashRevenueCentavos: 50_000,
+      cashExpensesCentavos: 0,
+      expenseCount: 0,
+      expenseReversalCount: 0,
       netRevenueCentavos: 100_000,
+      expectedRemainingCashCentavos: 50_000,
       totalCollectedCentavos: 100_000,
     },
     revenueTrend: [
@@ -188,6 +193,7 @@ test('shows Owner reporting controls and financial transaction totals', async ()
     ],
     vehicleTypes: [],
     activity: [],
+    expenses: [],
   };
   vi.stubGlobal(
     'fetch',
@@ -236,7 +242,7 @@ test('shows Owner reporting controls and financial transaction totals', async ()
   expect(
     screen.queryByRole('button', { name: 'Store reports' }),
   ).not.toBeInTheDocument();
-  expect(screen.getByText('Total revenue')).toBeInTheDocument();
+  expect(screen.getAllByText('Gross revenue').length).toBeGreaterThan(0);
   expect(screen.getAllByText('₱1,000').length).toBeGreaterThan(0);
   fireEvent.click(screen.getByRole('button', { name: 'By staff' }));
   expect(await screen.findByLabelText('Staff account')).toHaveValue('2');

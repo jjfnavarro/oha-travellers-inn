@@ -20,6 +20,7 @@ export type OwnerReportPreset =
   | 'specific_date'
   | 'week'
   | 'month'
+  | 'year'
   | 'custom';
 export type OwnerReportShift = 'ALL' | 'DAY' | 'NIGHT';
 export type OwnerReportScope = 'OVERALL' | 'ROOMS';
@@ -49,6 +50,7 @@ const staySelect = {
   arrivalType: true,
   vehicleType: true,
   durationHours: true,
+  numberOfDays: true,
   checkedInAt: true,
   expectedCheckoutAt: true,
   checkedOutAt: true,
@@ -68,9 +70,24 @@ const transactionSelect = {
   paymentMethod: true,
   createdAt: true,
   handledBy: { select: { id: true, username: true } },
+  expense: {
+    select: {
+      id: true,
+      reason: true,
+      status: true,
+      businessDate: true,
+      recordedById: true,
+      recordedBy: { select: { id: true, username: true } },
+      shift: { select: { id: true, type: true } },
+      voidedAt: true,
+      voidReason: true,
+      voidedBy: { select: { id: true, username: true } },
+    },
+  },
   stay: {
     select: {
       durationHours: true,
+      numberOfDays: true,
       room: { select: { number: true } },
     },
   },
@@ -119,6 +136,16 @@ function monthWindow(date: string): ReportWindow {
   };
 }
 
+function yearWindow(date: string): ReportWindow {
+  const selected = getOperationalDay(date);
+  const startsAt = new Date(Date.UTC(selected.startsAt.getUTCFullYear(), 0, 1));
+  return {
+    startsAt,
+    endsAt: new Date(Date.UTC(startsAt.getUTCFullYear() + 1, 0, 1)),
+    label: `Year ${startsAt.getUTCFullYear()}`,
+  };
+}
+
 export function resolveOwnerReportWindow(
   options: OwnerReportOptions,
 ): ReportWindow {
@@ -136,6 +163,7 @@ export function resolveOwnerReportWindow(
   const referenceDate = options.date ?? currentOperationalDate(now);
   if (options.preset === 'week') return weekWindow(referenceDate);
   if (options.preset === 'month') return monthWindow(referenceDate);
+  if (options.preset === 'year') return yearWindow(referenceDate);
   if (options.preset === 'custom') {
     if (!options.from || !options.to) {
       throw new Error('Select both the start and end date.');
@@ -196,12 +224,12 @@ export async function buildOwnerReport(
   const timestampRange = { gte: window.startsAt, lt: window.endsAt };
   const selectedStaff = options.staffId
     ? await prisma.staffAccount.findFirst({
-        where: { id: options.staffId, isActive: true },
+        where: { id: options.staffId },
         select: { id: true, username: true, role: true },
       })
     : null;
   if (options.staffId && !selectedStaff) {
-    throw new Error('The selected active staff account was not found.');
+    throw new Error('The selected staff account was not found.');
   }
 
   const [stays, transactions, extensions, auditLogs] = await Promise.all([
@@ -244,8 +272,15 @@ export async function buildOwnerReport(
       ) &&
       (!options.staffId || stay.checkedOutById === options.staffId),
   );
+  const revenueTypes = new Set<FinancialTransactionType>([
+    FinancialTransactionType.ROOM_CHARGE,
+    FinancialTransactionType.EXTENSION_CHARGE,
+    FinancialTransactionType.STORE_SALE,
+    FinancialTransactionType.EXTRA_CHARGE,
+  ]);
   const selectedTransactions = transactions.filter(
     (transaction) =>
+      revenueTypes.has(transaction.transactionType) &&
       isInShift(transaction.createdAt, options.shift) &&
       (!options.staffId || transaction.handledById === options.staffId) &&
       (!options.paymentMethod ||
@@ -254,6 +289,19 @@ export async function buildOwnerReport(
         transaction.transactionType === FinancialTransactionType.ROOM_CHARGE ||
         transaction.transactionType ===
           FinancialTransactionType.EXTENSION_CHARGE),
+  );
+  const selectedExpenseTransactions = transactions.filter(
+    (transaction) =>
+      (transaction.transactionType === FinancialTransactionType.EXPENSE ||
+        transaction.transactionType ===
+          FinancialTransactionType.EXPENSE_REVERSAL) &&
+      Boolean(transaction.expense) &&
+      isInShift(transaction.createdAt, options.shift) &&
+      (!options.staffId ||
+        transaction.expense?.recordedById === options.staffId) &&
+      (!options.paymentMethod ||
+        options.paymentMethod === PaymentMethod.CASH) &&
+      options.scope !== 'ROOMS',
   );
   const selectedExtensions = extensions.filter(
     (extension) =>
@@ -312,37 +360,58 @@ export async function buildOwnerReport(
   );
   const sum = (items: typeof selectedTransactions) =>
     items.reduce((total, item) => total + item.amountCentavos, 0);
+  const expenseTransactions = selectedExpenseTransactions.filter(
+    (item) => item.transactionType === FinancialTransactionType.EXPENSE,
+  );
+  const expenseReversals = selectedExpenseTransactions.filter(
+    (item) =>
+      item.transactionType === FinancialTransactionType.EXPENSE_REVERSAL,
+  );
 
   const packageMap = new Map<
-    number,
-    { durationHours: number; count: number; revenueCentavos: number }
+    string,
+    {
+      durationHours: number;
+      numberOfDays: number | null;
+      count: number;
+      revenueCentavos: number;
+    }
   >();
   for (const durationHours of [3, 6, 12, 24]) {
-    packageMap.set(durationHours, {
+    packageMap.set(`HOURS:${durationHours}`, {
       durationHours,
+      numberOfDays: null,
       count: 0,
       revenueCentavos: 0,
     });
   }
   for (const stay of checkIns) {
-    const item = packageMap.get(stay.durationHours) ?? {
+    const key = stay.numberOfDays
+      ? `DAYS:${stay.numberOfDays}`
+      : `HOURS:${stay.durationHours}`;
+    const item = packageMap.get(key) ?? {
       durationHours: stay.durationHours,
+      numberOfDays: stay.numberOfDays,
       count: 0,
       revenueCentavos: 0,
     };
     item.count += 1;
-    packageMap.set(stay.durationHours, item);
+    packageMap.set(key, item);
   }
   for (const transaction of roomChargeTransactions) {
     if (!transaction.stay) continue;
     const durationHours = transaction.stay.durationHours;
-    const item = packageMap.get(durationHours) ?? {
+    const key = transaction.stay.numberOfDays
+      ? `DAYS:${transaction.stay.numberOfDays}`
+      : `HOURS:${durationHours}`;
+    const item = packageMap.get(key) ?? {
       durationHours,
+      numberOfDays: transaction.stay.numberOfDays,
       count: 0,
       revenueCentavos: 0,
     };
     item.revenueCentavos += transaction.amountCentavos;
-    packageMap.set(durationHours, item);
+    packageMap.set(key, item);
   }
 
   const usageMap = new Map<
@@ -380,11 +449,24 @@ export async function buildOwnerReport(
   const storeRevenueCentavos = sum(storeTransactions);
   const extraChargesRevenueCentavos = sum(extraChargeTransactions);
   const grossRevenueCentavos = sum(selectedTransactions);
+  const cashExpensesCentavos = sum(expenseTransactions) - sum(expenseReversals);
+  const cashRevenueCentavos = sum(
+    selectedTransactions.filter(
+      (item) => item.paymentMethod === PaymentMethod.CASH,
+    ),
+  );
+  const netRevenueCentavos = grossRevenueCentavos - cashExpensesCentavos;
+  const expectedRemainingCashCentavos =
+    cashRevenueCentavos - cashExpensesCentavos;
   const revenueTrend = buildRevenueTrend(
     selectedTransactions,
     window.startsAt,
     window.endsAt,
-    ['week', 'month', 'custom'].includes(options.preset) ? 'DAY' : 'HOUR',
+    options.preset === 'year'
+      ? 'MONTH'
+      : ['week', 'month', 'custom'].includes(options.preset)
+        ? 'DAY'
+        : 'HOUR',
   );
 
   return {
@@ -428,7 +510,12 @@ export async function buildOwnerReport(
       storeRevenueCentavos,
       extraChargesRevenueCentavos,
       grossRevenueCentavos,
-      netRevenueCentavos: grossRevenueCentavos,
+      cashRevenueCentavos,
+      cashExpensesCentavos,
+      expenseCount: expenseTransactions.length,
+      expenseReversalCount: expenseReversals.length,
+      netRevenueCentavos,
+      expectedRemainingCashCentavos,
       totalCollectedCentavos: grossRevenueCentavos,
     },
     revenueTrend,
@@ -441,6 +528,19 @@ export async function buildOwnerReport(
       }),
     ),
     paymentMethods,
+    expenses: expenseTransactions.map((transaction) => ({
+      id: transaction.expense!.id,
+      amountCentavos: transaction.amountCentavos,
+      reason: transaction.expense!.reason,
+      status: transaction.expense!.status,
+      businessDate: transaction.expense!.businessDate,
+      createdAt: transaction.createdAt,
+      recordedBy: transaction.expense!.recordedBy,
+      shift: transaction.expense!.shift,
+      voidedAt: transaction.expense!.voidedAt,
+      voidReason: transaction.expense!.voidReason,
+      voidedBy: transaction.expense!.voidedBy,
+    })),
     vehicleTypes,
     activity: selectedAuditLogs.map((log) => {
       const details = detailsRecord(log.details);

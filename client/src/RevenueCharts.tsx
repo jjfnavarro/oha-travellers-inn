@@ -44,9 +44,11 @@ const compactMoney = (centavos: number) => {
 export function RevenueCharts({
   trend,
   breakdown,
+  paymentBreakdown,
 }: {
   trend: RevenueTrendPoint[];
   breakdown: RevenueBreakdownItem[];
+  paymentBreakdown?: RevenueBreakdownItem[];
 }) {
   return (
     <div className="revenue-chart-grid">
@@ -132,6 +134,50 @@ export function RevenueCharts({
           </ResponsiveContainer>
         </div>
       </section>
+      {paymentBreakdown && (
+        <section className="revenue-chart-panel">
+          <h3>Revenue by payment method</h3>
+          <div
+            className="revenue-chart-canvas"
+            role="img"
+            aria-label="Revenue by payment method"
+          >
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart
+                data={paymentBreakdown}
+                layout="vertical"
+                margin={{ top: 8, right: 22, left: 8, bottom: 4 }}
+              >
+                <CartesianGrid stroke="#dddddd" strokeDasharray="3 3" />
+                <XAxis
+                  type="number"
+                  tickFormatter={compactMoney}
+                  tick={{ fill: '#555555', fontSize: 11 }}
+                />
+                <YAxis
+                  dataKey="name"
+                  type="category"
+                  width={92}
+                  tick={{ fill: '#333333', fontSize: 11 }}
+                />
+                <Tooltip
+                  formatter={(value) => [money(Number(value)), 'Revenue']}
+                  labelStyle={{ color: '#1c1c1c' }}
+                />
+                <Bar
+                  dataKey="amountCentavos"
+                  radius={[0, 3, 3, 0]}
+                  isAnimationActive={false}
+                >
+                  {paymentBreakdown.map((item) => (
+                    <Cell key={item.name} fill={item.color} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </section>
+      )}
     </div>
   );
 }

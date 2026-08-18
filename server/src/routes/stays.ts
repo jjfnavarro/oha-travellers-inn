@@ -13,24 +13,45 @@ import { z } from 'zod';
 import { getShiftWindow } from '../services/shift-time.js';
 import { calculateExtendedCheckout } from '../services/stay-extension.js';
 import {
+  maximumStayDays,
+  resolveStayPricing,
+  StayPricingError,
+} from '../services/stay-pricing.js';
+import {
   createStayHistoryPdf,
   createStayHistoryWorkbook,
 } from './stay-history-export.js';
 
-const checkInSchema = z.object({
-  roomId: z.number().int().positive(),
-  durationHours: z.number().int().positive().max(24),
-  arrivalType: z.nativeEnum(ArrivalType),
-  vehicleType: z.nativeEnum(VehicleType).optional().nullable(),
-  guestName: z.string().trim().max(100).optional().nullable(),
-  plateNumber: z.string().trim().max(30).optional().nullable(),
-  notes: z.string().trim().max(500).optional().nullable(),
-  paymentMethod: z.enum([PaymentMethod.CASH, PaymentMethod.GCASH]),
-});
+const checkInSchema = z
+  .object({
+    roomId: z.number().int().positive(),
+    durationHours: z.number().int().positive().max(24).optional(),
+    numberOfDays: z.number().int().positive().max(maximumStayDays).optional(),
+    arrivalType: z.nativeEnum(ArrivalType),
+    vehicleType: z.nativeEnum(VehicleType).optional().nullable(),
+    guestName: z.string().trim().max(100).optional().nullable(),
+    plateNumber: z.string().trim().max(30).optional().nullable(),
+    notes: z.string().trim().max(500).optional().nullable(),
+    paymentMethod: z.enum([
+      PaymentMethod.CASH,
+      PaymentMethod.GCASH,
+      PaymentMethod.CARD,
+    ]),
+  })
+  .refine(
+    (value) =>
+      (value.durationHours === undefined) !==
+      (value.numberOfDays === undefined),
+    'Select either an hourly package or a number of days.',
+  );
 
 const extensionSchema = z.object({
   durationHours: z.number().int().positive().max(24),
-  paymentMethod: z.enum([PaymentMethod.CASH, PaymentMethod.GCASH]),
+  paymentMethod: z.enum([
+    PaymentMethod.CASH,
+    PaymentMethod.GCASH,
+    PaymentMethod.CARD,
+  ]),
 });
 
 const historyQuerySchema = z.object({
@@ -206,18 +227,19 @@ export function createStaysRouter(prisma: PrismaClient): Router {
           if (existingStay)
             throw new StayRuleError('This room is already occupied.', 409);
 
-          const rate =
-            room.rateOverrides.find(
-              (item) => item.durationHours === result.data.durationHours,
-            ) ??
-            room.roomType.rates.find(
-              (item) => item.durationHours === result.data.durationHours,
+          let pricing;
+          try {
+            pricing = resolveStayPricing(
+              room,
+              result.data.numberOfDays !== undefined
+                ? { numberOfDays: result.data.numberOfDays }
+                : { durationHours: result.data.durationHours! },
             );
-          if (!rate) {
-            throw new StayRuleError(
-              'The selected stay duration is not offered for this room.',
-              400,
-            );
+          } catch (error: unknown) {
+            if (error instanceof StayPricingError) {
+              throw new StayRuleError(error.message, 400);
+            }
+            throw error;
           }
 
           const checkedInAt = new Date();
@@ -228,7 +250,7 @@ export function createStaysRouter(prisma: PrismaClient): Router {
             create: shiftWindow,
           });
           const expectedCheckoutAt = new Date(
-            checkedInAt.getTime() + result.data.durationHours * 60 * 60 * 1000,
+            checkedInAt.getTime() + pricing.durationHours * 60 * 60 * 1000,
           );
 
           const stay = await transaction.stay.create({
@@ -247,8 +269,10 @@ export function createStaysRouter(prisma: PrismaClient): Router {
               plateNumber:
                 optionalText(result.data.plateNumber)?.toUpperCase() ?? null,
               notes: optionalText(result.data.notes),
-              durationHours: result.data.durationHours,
-              paidAmountCentavos: rate.amountCentavos,
+              durationHours: pricing.durationHours,
+              numberOfDays: pricing.numberOfDays,
+              rateAmountCentavos: pricing.rateAmountCentavos,
+              paidAmountCentavos: pricing.totalAmountCentavos,
               checkedInAt,
               expectedCheckoutAt,
             },
@@ -260,7 +284,7 @@ export function createStaysRouter(prisma: PrismaClient): Router {
               stayId: stay.id,
               handledById: request.authUser.id,
               transactionType: FinancialTransactionType.ROOM_CHARGE,
-              amountCentavos: rate.amountCentavos,
+              amountCentavos: pricing.totalAmountCentavos,
               paymentMethod: result.data.paymentMethod,
             },
           });
@@ -273,7 +297,9 @@ export function createStaysRouter(prisma: PrismaClient): Router {
               details: {
                 roomId: stay.roomId,
                 durationHours: stay.durationHours,
-                amountCentavos: rate.amountCentavos,
+                numberOfDays: pricing.numberOfDays,
+                rateAmountCentavos: pricing.rateAmountCentavos,
+                amountCentavos: pricing.totalAmountCentavos,
                 paymentMethod: result.data.paymentMethod,
               },
             },

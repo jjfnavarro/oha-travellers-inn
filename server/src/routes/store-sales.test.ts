@@ -98,6 +98,18 @@ describe('store purchases', () => {
       FinancialTransactionType.EXTRA_CHARGE,
       10,
     ],
+    [
+      ProductCategory.STORE_PRODUCT,
+      PaymentMethod.CARD,
+      FinancialTransactionType.STORE_SALE,
+      null,
+    ],
+    [
+      ProductCategory.EXTRA_CHARGE,
+      PaymentMethod.CARD,
+      FinancialTransactionType.EXTRA_CHARGE,
+      10,
+    ],
   ])(
     'calculates quantity and creates a %s ledger transaction',
     async (category, paymentMethod, transactionType, stayId) => {

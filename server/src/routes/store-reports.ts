@@ -18,11 +18,12 @@ const querySchema = z.object({
       'specific_date',
       'week',
       'month',
+      'year',
       'custom',
     ])
     .default('today'),
   shift: z.enum(['ALL', 'DAY', 'NIGHT']).default('ALL'),
-  paymentMethod: z.enum(['CASH', 'GCASH']).optional(),
+  paymentMethod: z.enum(['CASH', 'GCASH', 'CARD']).optional(),
   date: z
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/)
@@ -70,6 +71,15 @@ async function pdf(report: StoreReport): Promise<Buffer> {
   );
   document.text(`Combined: ${money(report.summary.totalRevenueCentavos)}`);
   document.text(`Items sold: ${report.summary.itemsSold}`).moveDown();
+  document.fontSize(11).text('Payment methods', { underline: true });
+  for (const item of report.paymentMethods) {
+    document
+      .fontSize(9)
+      .text(
+        `${item.method}: ${item.count} sales - ${money(item.amountCentavos)}`,
+      );
+  }
+  document.moveDown();
   drawRevenueCharts(document, report.revenueTrend, [
     {
       label: 'Store',
@@ -123,23 +133,30 @@ async function workbook(report: StoreReport): Promise<Buffer> {
       { value: 'Store products' },
       {
         value: report.summary.storeRevenueCentavos / 100,
-        format: 'â‚±#,##0.00',
+        format: '₱#,##0.00',
       },
     ],
     [
       { value: 'Extra charges' },
       {
         value: report.summary.extraChargesRevenueCentavos / 100,
-        format: 'â‚±#,##0.00',
+        format: '₱#,##0.00',
       },
     ],
     [
       { value: 'Combined' },
       {
         value: report.summary.totalRevenueCentavos / 100,
-        format: 'â‚±#,##0.00',
+        format: '₱#,##0.00',
       },
     ],
+    [],
+    [header('Payment method'), header('Transactions'), header('Revenue')],
+    ...report.paymentMethods.map((item) => [
+      { value: item.method },
+      { value: item.count },
+      { value: item.amountCentavos / 100, format: '₱#,##0.00' },
+    ]),
     [],
     [
       header('Trend period'),
@@ -166,7 +183,7 @@ async function workbook(report: StoreReport): Promise<Buffer> {
       { value: item.category.replaceAll('_', ' ') },
       { value: item.quantity },
       { value: item.salesCount },
-      { value: item.revenueCentavos / 100, format: 'â‚±#,##0.00' },
+      { value: item.revenueCentavos / 100, format: '₱#,##0.00' },
     ]),
   ];
   return writeXlsxFile(data, {

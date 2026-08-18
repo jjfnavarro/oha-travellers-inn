@@ -38,9 +38,21 @@ const roomTypes = [
   },
   {
     name: 'Family',
-    description: 'Family room available for 24-hour stays',
-    rates: [{ durationHours: 24, amountCentavos: 125_000 }],
+    description: 'Family room available for 12-hour and longer stays',
+    rates: [
+      { durationHours: 12, amountCentavos: 180_000 },
+      { durationHours: 24, amountCentavos: 125_000 },
+    ],
     rooms: ['34'],
+  },
+  {
+    name: 'Transient',
+    description: 'Transient room available for 12-hour and longer stays',
+    rates: [
+      { durationHours: 12, amountCentavos: 180_000 },
+      { durationHours: 24, amountCentavos: 250_000 },
+    ],
+    rooms: [],
   },
 ] as const;
 
@@ -57,13 +69,18 @@ async function seed(): Promise<void> {
       },
     });
 
-    await prisma.stayRate.deleteMany({ where: { roomTypeId: roomType.id } });
-    await prisma.stayRate.createMany({
-      data: roomTypeData.rates.map((rate) => ({
-        roomTypeId: roomType.id,
-        ...rate,
-      })),
-    });
+    for (const rate of roomTypeData.rates) {
+      await prisma.stayRate.upsert({
+        where: {
+          roomTypeId_durationHours: {
+            roomTypeId: roomType.id,
+            durationHours: rate.durationHours,
+          },
+        },
+        update: {},
+        create: { roomTypeId: roomType.id, ...rate },
+      });
+    }
 
     for (const number of roomTypeData.rooms) {
       const room = await prisma.room.upsert({
@@ -102,7 +119,7 @@ async function seed(): Promise<void> {
 }
 
 seed()
-  .then(() => console.log('Seeded 4 room types, their rates, and 28 rooms.'))
+  .then(() => console.log('Seeded 5 room types, their rates, and 28 rooms.'))
   .catch((error: unknown) => {
     console.error('Database seed failed:', error);
     process.exitCode = 1;

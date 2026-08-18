@@ -650,9 +650,27 @@ button:disabled {
   text-transform: uppercase;
 }
 .room-card-top strong {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
   color: #111111;
   font-size: 2rem;
   line-height: 1;
+}
+
+.room-card-top > div {
+  min-width: 0;
+  max-width: 78%;
+}
+
+.room-card-top strong.long-room-number {
+  font-size: 1.2rem;
+  line-height: 1.15;
+  text-align: right;
+}
+
+.booking-card-heading > strong {
+  overflow-wrap: anywhere;
 }
 .room-card .room-type {
   margin: 14px 0 10px;
@@ -871,6 +889,17 @@ button:disabled {
 }
 .room-rate-table {
   min-width: 960px;
+}
+
+.rate-room-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.rate-room-actions button {
+  white-space: nowrap;
 }
 .rate-not-offered {
   color: #777777;
@@ -1583,7 +1612,8 @@ button:disabled {
 }
 .segmented-field > div {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
 }
 .segmented-field button {
   min-height: 42px;
@@ -2077,5 +2107,150 @@ button:disabled {
   }
   .history-report .history-store-sales {
     min-width: 0;
+  }
+}
+.stay-calculation,
+.cash-only-note {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border-left: 4px solid #1c1c1c;
+  background: #ededed;
+}
+
+.stay-calculation > *,
+.cash-only-note > * {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.room-card-top > div {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.compact-icon-button {
+  width: 30px;
+  min-width: 30px;
+  height: 30px;
+}
+
+.danger-button {
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid #a71919;
+  background: #fff;
+  color: #a71919;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.danger-button:hover {
+  background: #a71919;
+  color: #fff;
+}
+
+.split-actions .danger-button {
+  margin-right: auto;
+}
+
+.expense-entry {
+  max-width: 680px;
+  padding: 20px;
+  border: 1px solid #c7c7c7;
+  background: #fff;
+}
+
+.expense-entry form {
+  display: grid;
+  gap: 16px;
+}
+
+.expense-entry label {
+  min-width: 0;
+  display: grid;
+  gap: 7px;
+  color: #454545;
+  font-weight: 650;
+}
+
+.expense-entry input,
+.expense-entry textarea {
+  width: 100%;
+  min-width: 0;
+  padding: 10px 11px;
+  border: 1px solid #bdbdbd;
+  border-radius: 5px;
+  background: #ffffff;
+}
+
+.expense-entry input {
+  min-height: 44px;
+}
+
+.expense-entry textarea {
+  min-height: 92px;
+  resize: vertical;
+}
+
+.expense-entry .section-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.expense-entry .section-heading h3,
+.expense-history h3 {
+  margin: 0;
+}
+
+.expense-history {
+  margin-top: 28px;
+}
+
+.expense-table {
+  min-width: 820px;
+}
+
+.form-message {
+  max-width: 680px;
+  padding: 12px;
+  border: 1px solid #a5a5a5;
+  background: #f4f4f4;
+}
+
+@media (max-width: 600px) {
+  .expense-entry {
+    padding: 16px;
+  }
+
+  .split-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .split-actions .danger-button {
+    grid-column: 1 / -1;
+    margin-right: 0;
+  }
+
+  .split-actions > button {
+    width: 100%;
+  }
+
+  .booking-details {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (pointer: coarse) {
+  .expense-entry input,
+  .expense-entry textarea,
+  .danger-button {
+    min-height: 48px;
   }
 }

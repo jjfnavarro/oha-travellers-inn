@@ -2,6 +2,11 @@ import { Prisma, type PrismaClient } from '@prisma/client';
 import { Router } from 'express';
 import { z } from 'zod';
 import { requireOwner } from '../middleware/auth.js';
+import {
+  canonicalRoomTypeNames,
+  configuredDurationsAreValid,
+  normalizedRoomTypeName,
+} from '../services/stay-pricing.js';
 
 const rateSchema = z.object({
   durationHours: z.number().int().positive().max(24),
@@ -23,6 +28,20 @@ const roomTypeSchema = z.object({
 
 function validationMessage(error: z.ZodError): string {
   return error.issues.map((issue) => issue.message).join(' ');
+}
+
+function validateRatePolicy(name: string, rates: { durationHours: number }[]) {
+  if (
+    !configuredDurationsAreValid(
+      name,
+      rates.map((rate) => rate.durationHours),
+    )
+  ) {
+    throw new RateRuleError(
+      'Family and Transient room types must offer exactly 12-hour and 24-hour rates.',
+      400,
+    );
+  }
 }
 
 export function createRoomTypesRouter(prisma: PrismaClient): Router {
@@ -47,6 +66,7 @@ export function createRoomTypesRouter(prisma: PrismaClient): Router {
     }
 
     try {
+      validateRatePolicy(result.data.name, result.data.rates);
       const roomType = await prisma.roomType.create({
         data: {
           name: result.data.name,
@@ -57,6 +77,10 @@ export function createRoomTypesRouter(prisma: PrismaClient): Router {
       });
       response.status(201).json({ data: roomType });
     } catch (error: unknown) {
+      if (error instanceof RateRuleError) {
+        response.status(error.statusCode).json({ message: error.message });
+        return;
+      }
       if (
         error instanceof Prisma.PrismaClientKnownRequestError &&
         error.code === 'P2002'
@@ -87,6 +111,19 @@ export function createRoomTypesRouter(prisma: PrismaClient): Router {
           include: { rates: { orderBy: { durationHours: 'asc' } } },
         });
         if (!previous) throw new RateRuleError('Room type not found.', 404);
+        const previousName = normalizedRoomTypeName(previous.name);
+        if (
+          canonicalRoomTypeNames.includes(
+            previousName as (typeof canonicalRoomTypeNames)[number],
+          ) &&
+          normalizedRoomTypeName(body.data.name) !== previousName
+        ) {
+          throw new RateRuleError(
+            'Canonical room type names cannot be changed.',
+            400,
+          );
+        }
+        validateRatePolicy(body.data.name, body.data.rates);
         await transaction.stayRate.deleteMany({
           where: { roomTypeId: id.data },
         });

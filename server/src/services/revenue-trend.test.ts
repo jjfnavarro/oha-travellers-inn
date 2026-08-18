@@ -34,3 +34,23 @@ test('creates zero-filled hourly revenue buckets by transaction source', () => {
   });
   expect(trend[2]?.totalRevenueCentavos).toBe(0);
 });
+
+test('creates monthly buckets for yearly reports', () => {
+  const trend = buildRevenueTrend(
+    [
+      {
+        createdAt: new Date('2026-08-11T01:00:00.000Z'),
+        transactionType: FinancialTransactionType.ROOM_CHARGE,
+        amountCentavos: 100_000,
+      },
+    ],
+    new Date('2026-01-01T00:00:00.000Z'),
+    new Date('2027-01-01T00:00:00.000Z'),
+    'MONTH',
+  );
+  expect(trend).toHaveLength(12);
+  expect(trend[7]).toMatchObject({
+    label: 'Aug',
+    totalRevenueCentavos: 100_000,
+  });
+});

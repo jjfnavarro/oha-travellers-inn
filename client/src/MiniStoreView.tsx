@@ -12,7 +12,7 @@ import { apiRequest, apiUrl } from './api';
 import { ProductImageCropDialog } from './ProductImageCropDialog';
 
 type ProductCategory = 'STORE_PRODUCT' | 'EXTRA_CHARGE';
-type PaymentMethod = 'CASH' | 'GCASH';
+type PaymentMethod = 'CASH' | 'GCASH' | 'CARD';
 
 interface Product {
   id: number;
@@ -411,6 +411,13 @@ function PurchaseDialog({
               onClick={() => setPaymentMethod('GCASH')}
             >
               GCash
+            </button>
+            <button
+              type="button"
+              className={paymentMethod === 'CARD' ? 'selected' : ''}
+              onClick={() => setPaymentMethod('CARD')}
+            >
+              Card
             </button>
           </div>
         </fieldset>

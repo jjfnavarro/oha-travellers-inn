@@ -55,6 +55,7 @@ interface Booking {
   roomId: number | null;
   room: BookingRoom | null;
   expectedDurationHours: number;
+  numberOfDays?: number | null;
   guestName: string | null;
   contactNumber: string | null;
   arrivalType: ArrivalType | null;
@@ -72,6 +73,7 @@ interface BookingFormValue {
   estimatedArrivalAt: string;
   roomId: string;
   expectedDurationHours: string;
+  numberOfDays: string;
   guestName: string;
   contactNumber: string;
   arrivalType: '' | ArrivalType;
@@ -134,6 +136,7 @@ function emptyForm(date: string): BookingFormValue {
     estimatedArrivalAt: '',
     roomId: '',
     expectedDurationHours: '3',
+    numberOfDays: '1',
     guestName: '',
     contactNumber: '',
     arrivalType: '',
@@ -149,7 +152,10 @@ function bookingForm(booking: Booking): BookingFormValue {
     bookingDate: booking.bookingDate.slice(0, 10),
     estimatedArrivalAt: dateTimeInput(booking.estimatedArrivalAt),
     roomId: booking.roomId ? String(booking.roomId) : '',
-    expectedDurationHours: String(booking.expectedDurationHours),
+    expectedDurationHours: booking.numberOfDays
+      ? 'DAYS'
+      : String(booking.expectedDurationHours),
+    numberOfDays: String(booking.numberOfDays ?? 1),
     guestName: booking.guestName ?? '',
     contactNumber: booking.contactNumber ?? '',
     arrivalType: booking.arrivalType ?? '',
@@ -412,7 +418,11 @@ function BookingSection({
                 </div>
                 <div>
                   <dt>Stay</dt>
-                  <dd>{booking.expectedDurationHours} hours</dd>
+                  <dd>
+                    {booking.numberOfDays
+                      ? `${booking.numberOfDays} ${booking.numberOfDays === 1 ? 'day' : 'days'} (${booking.expectedDurationHours} hours)`
+                      : `${booking.expectedDurationHours} hours`}
+                  </dd>
                 </div>
                 {booking.contactNumber && (
                   <div>
@@ -510,10 +520,34 @@ function BookingDialog({
         );
     return [...new Set(values)].sort((left, right) => left - right);
   }, [form.roomId, rooms]);
+  const selectedRoom = rooms.find((item) => item.id === Number(form.roomId));
+  const supportsDays = selectedRoom
+    ? Boolean(effectiveRoomRate(selectedRoom, 24))
+    : rooms.some((room) => Boolean(effectiveRoomRate(room, 24)));
+  const isDays = form.expectedDurationHours === 'DAYS';
+  const parsedDays = Number(form.numberOfDays);
+  const daysAreValid =
+    Number.isInteger(parsedDays) && parsedDays >= 1 && parsedDays <= 365;
+  const totalDurationHours = isDays
+    ? daysAreValid
+      ? parsedDays * 24
+      : 0
+    : Number(form.expectedDurationHours);
+  const dayRate = selectedRoom
+    ? effectiveRoomRate(selectedRoom, 24)
+    : undefined;
+  const expectedEnd =
+    form.estimatedArrivalAt && totalDurationHours > 0
+      ? new Date(
+          new Date(form.estimatedArrivalAt).getTime() +
+            totalDurationHours * 60 * 60 * 1000,
+        )
+      : null;
 
   useEffect(() => {
     if (
       durations.length > 0 &&
+      form.expectedDurationHours !== 'DAYS' &&
       !durations.includes(Number(form.expectedDurationHours))
     ) {
       setForm((current) => ({
@@ -543,7 +577,8 @@ function BookingDialog({
             ? new Date(form.estimatedArrivalAt).toISOString()
             : null,
           roomId: form.roomId ? Number(form.roomId) : null,
-          expectedDurationHours: Number(form.expectedDurationHours),
+          expectedDurationHours: totalDurationHours,
+          ...(isDays ? { numberOfDays: parsedDays } : {}),
           guestName: form.guestName,
           contactNumber: form.contactNumber,
           arrivalType: form.arrivalType || null,
@@ -620,11 +655,13 @@ function BookingDialog({
                 onChange={(event) => setField('roomId', event.target.value)}
               >
                 <option value="">Room not assigned</option>
-                {rooms.map((room) => (
-                  <option key={room.id} value={room.id}>
-                    Room {room.number} · {room.roomType.name}
-                  </option>
-                ))}
+                {rooms
+                  .filter((room) => room.operationalStatus === 'ACTIVE')
+                  .map((room) => (
+                    <option key={room.id} value={room.id}>
+                      Room {room.number} · {room.roomType.name}
+                    </option>
+                  ))}
               </select>
             </label>
             <label>
@@ -641,8 +678,53 @@ function BookingDialog({
                     {duration} hours
                   </option>
                 ))}
+                {supportsDays && <option value="DAYS">Days</option>}
               </select>
             </label>
+            {isDays && (
+              <label>
+                Number of days
+                <input
+                  required
+                  type="number"
+                  min={1}
+                  max={365}
+                  step={1}
+                  inputMode="numeric"
+                  value={form.numberOfDays}
+                  onChange={(event) =>
+                    setField('numberOfDays', event.target.value)
+                  }
+                />
+              </label>
+            )}
+            {isDays && daysAreValid && (
+              <div className="stay-calculation">
+                <span>Total duration: {totalDurationHours} hours</span>
+                {dayRate ? (
+                  <>
+                    <span>
+                      24-hour rate: ₱
+                      {(dayRate.amountCentavos / 100).toLocaleString('en-PH')}
+                    </span>
+                    <span>
+                      Estimated total: ₱
+                      {(
+                        (dayRate.amountCentavos * parsedDays) /
+                        100
+                      ).toLocaleString('en-PH')}
+                    </span>
+                  </>
+                ) : (
+                  <span>Price will be determined by the assigned room.</span>
+                )}
+                {expectedEnd && (
+                  <span>
+                    Expected end: {expectedEnd.toLocaleString('en-PH')}
+                  </span>
+                )}
+              </div>
+            )}
             <label>
               Guest name <span className="optional">Optional</span>
               <input
@@ -745,7 +827,11 @@ function BookingDialog({
             </button>
             <button
               className="primary-button"
-              disabled={saving || durations.length === 0}
+              disabled={
+                saving ||
+                (durations.length === 0 && !supportsDays) ||
+                (isDays && !daysAreValid)
+              }
             >
               {saving ? 'Saving...' : 'Save booking'}
             </button>
@@ -772,7 +858,9 @@ function ArrivalDialog({
       room.operationalStatus === 'ACTIVE' &&
       room.stays.length === 0 &&
       room.roomType.rates.some(
-        (rate) => rate.durationHours === booking.expectedDurationHours,
+        (rate) =>
+          rate.durationHours ===
+          (booking.numberOfDays ? 24 : booking.expectedDurationHours),
       ),
   );
   const assignedRoomIsAvailable = availableRooms.some(
@@ -783,7 +871,9 @@ function ArrivalDialog({
       (assignedRoomIsAvailable ? booking.roomId : availableRooms[0]?.id) ?? '',
     ),
   );
-  const [paymentMethod, setPaymentMethod] = useState<'CASH' | 'GCASH'>('CASH');
+  const [paymentMethod, setPaymentMethod] = useState<'CASH' | 'GCASH' | 'CARD'>(
+    'CASH',
+  );
   const [arrivalType, setArrivalType] = useState<ArrivalType>(
     booking.arrivalType ?? 'WALK_IN',
   );
@@ -796,8 +886,14 @@ function ArrivalDialog({
     (room) => room.id === Number(roomId),
   );
   const rate = selectedRoom
-    ? effectiveRoomRate(selectedRoom, booking.expectedDurationHours)
+    ? effectiveRoomRate(
+        selectedRoom,
+        booking.numberOfDays ? 24 : booking.expectedDurationHours,
+      )
     : undefined;
+  const totalAmountCentavos = rate
+    ? rate.amountCentavos * (booking.numberOfDays ?? 1)
+    : null;
 
   async function submit(event: FormEvent): Promise<void> {
     event.preventDefault();
@@ -921,17 +1017,24 @@ function ArrivalDialog({
               >
                 GCash
               </button>
+              <button
+                type="button"
+                className={paymentMethod === 'CARD' ? 'active' : ''}
+                onClick={() => setPaymentMethod('CARD')}
+              >
+                Card
+              </button>
             </div>
           </fieldset>
           <div className="payment-summary">
             <span>Payment at check-in</span>
             <strong>
-              {rate
+              {totalAmountCentavos !== null
                 ? new Intl.NumberFormat('en-PH', {
                     style: 'currency',
                     currency: 'PHP',
                     minimumFractionDigits: 0,
-                  }).format(rate.amountCentavos / 100)
+                  }).format(totalAmountCentavos / 100)
                 : 'Select an eligible room'}
             </strong>
             <small>The current room rate will be saved with this stay.</small>

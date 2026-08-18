@@ -55,6 +55,7 @@ function conversionDatabase(failFinancialWrite = false) {
         id: 22,
         operationalStatus: RoomOperationalStatus.ACTIVE,
         roomType: {
+          name: 'Standard',
           rates: [{ durationHours: 3, amountCentavos: 45_000 }],
         },
         rateOverrides: [],
@@ -185,6 +186,65 @@ describe('booking routes', () => {
       }),
     );
     expect(transaction.auditLog.create).toHaveBeenCalledOnce();
+  });
+
+  test('accepts Card when converting a booking to a paid stay', async () => {
+    const { prisma, transaction } = conversionDatabase();
+    const response = await request(
+      createApp(environment, vi.fn().mockResolvedValue(undefined), prisma),
+    )
+      .post('/api/bookings/7/arrive')
+      .set('Cookie', 'oha_session=test-token')
+      .send({ paymentMethod: PaymentMethod.CARD });
+
+    expect(response.status).toBe(201);
+    expect(transaction.financialTransaction.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ paymentMethod: PaymentMethod.CARD }),
+    });
+  });
+
+  test('converts a three-day booking using the effective 24-hour rate', async () => {
+    const { prisma, transaction } = conversionDatabase();
+    transaction.booking.findUnique.mockResolvedValue({
+      id: 7,
+      roomId: 22,
+      expectedDurationHours: 72,
+      numberOfDays: 3,
+      guestName: 'Guest',
+      arrivalType: ArrivalType.WALK_IN,
+      vehicleType: null,
+      plateNumber: null,
+      notes: null,
+      bookingReference: 'OHA-7',
+      status: BookingStatus.CONFIRMED,
+    });
+    transaction.room.findUnique.mockResolvedValue({
+      id: 22,
+      operationalStatus: RoomOperationalStatus.ACTIVE,
+      roomType: {
+        name: 'Standard',
+        rates: [{ durationHours: 24, amountCentavos: 100_000 }],
+      },
+      rateOverrides: [{ durationHours: 24, amountCentavos: 120_000 }],
+    });
+    const response = await request(
+      createApp(environment, vi.fn().mockResolvedValue(undefined), prisma),
+    )
+      .post('/api/bookings/7/arrive')
+      .set('Cookie', 'oha_session=test-token')
+      .send({ paymentMethod: PaymentMethod.CASH });
+
+    expect(response.status).toBe(201);
+    expect(transaction.stay.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          durationHours: 72,
+          numberOfDays: 3,
+          rateAmountCentavos: 120_000,
+          paidAmountCentavos: 360_000,
+        }),
+      }),
+    );
   });
 
   test('does not update the booking after a failed financial write', async () => {

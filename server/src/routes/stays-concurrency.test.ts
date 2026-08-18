@@ -110,35 +110,36 @@ describe('stay concurrency and cleaning rules', () => {
     expect(transaction.financialTransaction.create).toHaveBeenCalledOnce();
   });
 
-  test('rejects check-in while a room is cleaning', async () => {
-    const transaction = {
-      room: {
-        findUnique: vi
-          .fn()
-          .mockResolvedValue(activeRoom(RoomOperationalStatus.CLEANING)),
-      },
-    };
-    const prisma = {
-      session: { findUnique: vi.fn().mockResolvedValue(authSession) },
-      $transaction: vi.fn(async (callback: (client: unknown) => unknown) =>
-        callback(transaction),
-      ),
-    } as unknown as PrismaClient;
+  test.each([RoomOperationalStatus.CLEANING, RoomOperationalStatus.INACTIVE])(
+    'rejects check-in while a room is %s',
+    async (status) => {
+      const transaction = {
+        room: {
+          findUnique: vi.fn().mockResolvedValue(activeRoom(status)),
+        },
+      };
+      const prisma = {
+        session: { findUnique: vi.fn().mockResolvedValue(authSession) },
+        $transaction: vi.fn(async (callback: (client: unknown) => unknown) =>
+          callback(transaction),
+        ),
+      } as unknown as PrismaClient;
 
-    const response = await request(
-      createApp(environment, vi.fn().mockResolvedValue(undefined), prisma),
-    )
-      .post('/api/stays/check-in')
-      .set('Cookie', 'oha_session=test')
-      .send({
-        roomId: 1,
-        durationHours: 3,
-        arrivalType: ArrivalType.WALK_IN,
-        paymentMethod: PaymentMethod.CASH,
-      });
+      const response = await request(
+        createApp(environment, vi.fn().mockResolvedValue(undefined), prisma),
+      )
+        .post('/api/stays/check-in')
+        .set('Cookie', 'oha_session=test')
+        .send({
+          roomId: 1,
+          durationHours: 3,
+          arrivalType: ArrivalType.WALK_IN,
+          paymentMethod: PaymentMethod.CASH,
+        });
 
-    expect(response.status).toBe(409);
-  });
+      expect(response.status).toBe(409);
+    },
+  );
 
   test('charges a room-specific rate override at check-in', async () => {
     const room = {
@@ -180,6 +181,102 @@ describe('stay concurrency and cleaning rules', () => {
     expect(response.status).toBe(201);
     expect(transaction.financialTransaction.create).toHaveBeenCalledWith({
       data: expect.objectContaining({ amountCentavos: 30_000 }),
+    });
+  });
+
+  test('charges a multi-day Card stay from the overridden 24-hour rate', async () => {
+    const room = {
+      ...activeRoom(),
+      roomType: {
+        id: 1,
+        name: 'Standard',
+        rates: [{ id: 2, durationHours: 24, amountCentavos: 100_000 }],
+      },
+      rateOverrides: [
+        { id: 2, roomId: 1, durationHours: 24, amountCentavos: 120_000 },
+      ],
+    };
+    const transaction = {
+      room: { findUnique: vi.fn().mockResolvedValue(room) },
+      stay: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockResolvedValue({ id: 2, roomId: 1 }),
+      },
+      shift: { upsert: vi.fn().mockResolvedValue({ id: 1 }) },
+      financialTransaction: { create: vi.fn().mockResolvedValue({ id: 2 }) },
+      auditLog: { create: vi.fn().mockResolvedValue({ id: 2 }) },
+    };
+    const prisma = {
+      session: { findUnique: vi.fn().mockResolvedValue(authSession) },
+      $transaction: vi.fn(async (callback: (client: unknown) => unknown) =>
+        callback(transaction),
+      ),
+    } as unknown as PrismaClient;
+
+    const response = await request(
+      createApp(environment, vi.fn().mockResolvedValue(undefined), prisma),
+    )
+      .post('/api/stays/check-in')
+      .set('Cookie', 'oha_session=test')
+      .send({
+        roomId: 1,
+        numberOfDays: 3,
+        arrivalType: ArrivalType.WALK_IN,
+        paymentMethod: PaymentMethod.CARD,
+      });
+
+    expect(response.status).toBe(201);
+    expect(transaction.stay.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          durationHours: 72,
+          numberOfDays: 3,
+          rateAmountCentavos: 120_000,
+          paidAmountCentavos: 360_000,
+        }),
+      }),
+    );
+    expect(transaction.financialTransaction.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        amountCentavos: 360_000,
+        paymentMethod: PaymentMethod.CARD,
+      }),
+    });
+  });
+
+  test('accepts Card for a stay extension', async () => {
+    const activeStay = {
+      id: 9,
+      roomId: 1,
+      status: StayStatus.ACTIVE,
+      expectedCheckoutAt: new Date('2026-08-18T08:00:00.000Z'),
+      room: activeRoom(),
+    };
+    const transaction = {
+      stay: {
+        findFirst: vi.fn().mockResolvedValue(activeStay),
+        update: vi.fn().mockResolvedValue(activeStay),
+      },
+      stayExtension: { create: vi.fn().mockResolvedValue({ id: 1 }) },
+      financialTransaction: { create: vi.fn().mockResolvedValue({ id: 1 }) },
+      auditLog: { create: vi.fn().mockResolvedValue({ id: 1 }) },
+    };
+    const prisma = {
+      session: { findUnique: vi.fn().mockResolvedValue(authSession) },
+      $transaction: vi.fn(async (callback: (client: unknown) => unknown) =>
+        callback(transaction),
+      ),
+    } as unknown as PrismaClient;
+    const response = await request(
+      createApp(environment, vi.fn().mockResolvedValue(undefined), prisma),
+    )
+      .post('/api/stays/9/extensions')
+      .set('Cookie', 'oha_session=test')
+      .send({ durationHours: 3, paymentMethod: PaymentMethod.CARD });
+
+    expect(response.status).toBe(201);
+    expect(transaction.financialTransaction.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ paymentMethod: PaymentMethod.CARD }),
     });
   });
 

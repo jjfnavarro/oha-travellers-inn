@@ -36,7 +36,7 @@ interface StoreReport {
   };
   revenueTrend: RevenueTrendPoint[];
   paymentMethods: {
-    method: 'CASH' | 'GCASH';
+    method: 'CASH' | 'GCASH' | 'CARD';
     count: number;
     amountCentavos: number;
   }[];
@@ -62,7 +62,7 @@ interface StoreReport {
     staff: { id: number; username: string };
     stayId: number | null;
     roomNumber: string | null;
-    paymentMethod: 'CASH' | 'GCASH';
+    paymentMethod: 'CASH' | 'GCASH' | 'CARD';
     totalAmountCentavos: number;
     items: {
       name: string;
@@ -118,9 +118,8 @@ export function StoreReportView({
     if (embeddedQuery !== undefined) return;
     apiRequest<{ data: StaffRecord[] }>('/staff')
       .then((response) => {
-        const active = response.data.filter((item) => item.isActive);
-        setStaff(active);
-        setStaffId(String(active[0]?.id ?? ''));
+        setStaff(response.data);
+        setStaffId(String(response.data[0]?.id ?? ''));
       })
       .catch((error: unknown) =>
         setMessage(
@@ -369,6 +368,21 @@ export function StoreReportView({
                   color: '#a05a2c',
                 },
               ]}
+              paymentBreakdown={report.paymentMethods.map((item) => ({
+                name:
+                  item.method === 'GCASH'
+                    ? 'GCash'
+                    : item.method === 'CARD'
+                      ? 'Card'
+                      : 'Cash',
+                amountCentavos: item.amountCentavos,
+                color:
+                  item.method === 'CASH'
+                    ? '#1c1c1c'
+                    : item.method === 'GCASH'
+                      ? '#18823b'
+                      : '#9a5b13',
+              }))}
             />
           </Suspense>
           <div className="report-breakdown-grid">
@@ -376,7 +390,11 @@ export function StoreReportView({
               title="Payment methods"
               headers={['Method', 'Sales', 'Collected']}
               rows={report.paymentMethods.map((item) => [
-                item.method === 'GCASH' ? 'GCash' : 'Cash',
+                item.method === 'GCASH'
+                  ? 'GCash'
+                  : item.method === 'CARD'
+                    ? 'Card'
+                    : 'Cash',
                 item.count,
                 money(item.amountCentavos),
               ])}
@@ -425,7 +443,12 @@ export function StoreReportView({
                       {sale.roomNumber
                         ? `Room ${sale.roomNumber}`
                         : 'Front desk'}{' '}
-                      · {sale.paymentMethod === 'GCASH' ? 'GCash' : 'Cash'}
+                      ·{' '}
+                      {sale.paymentMethod === 'GCASH'
+                        ? 'GCash'
+                        : sale.paymentMethod === 'CARD'
+                          ? 'Card'
+                          : 'Cash'}
                     </small>
                   </div>
                   <b>{money(sale.totalAmountCentavos)}</b>

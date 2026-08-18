@@ -10,6 +10,7 @@ export interface StayHistoryExportRecord {
   plateNumber: string | null;
   notes: string | null;
   durationHours: number;
+  numberOfDays?: number | null;
   paidAmountCentavos: number;
   checkedInAt: Date;
   expectedCheckoutAt: Date;
@@ -63,7 +64,7 @@ function storePurchases(stay: StayHistoryExportRecord): string {
     .flatMap((sale) =>
       sale.items.map(
         (item) =>
-          `${item.quantity} x ${item.productNameSnapshot} (${money(sale.totalAmountCentavos)}, ${sale.paymentMethod === 'GCASH' ? 'GCash' : 'Cash'})`,
+          `${item.quantity} x ${item.productNameSnapshot} (${money(sale.totalAmountCentavos)}, ${sale.paymentMethod === 'GCASH' ? 'GCash' : sale.paymentMethod === 'CARD' ? 'Card' : 'Cash'})`,
       ),
     )
     .join('; ');
@@ -104,7 +105,7 @@ export async function createStayHistoryPdf(
         `Check-in: ${dateTime(stay.checkedInAt)} | Expected checkout: ${dateTime(stay.expectedCheckoutAt)} | Checkout: ${dateTime(stay.checkedOutAt)}`,
       )
       .text(
-        `Stay: ${stay.durationHours} hours | Room payment: ${money(stay.paidAmountCentavos)} | Shift: ${stay.shift?.type ?? 'Not recorded'}`,
+        `Stay: ${stay.numberOfDays ? `${stay.numberOfDays} ${stay.numberOfDays === 1 ? 'day' : 'days'} (${stay.durationHours} hours)` : `${stay.durationHours} hours`} | Room payment: ${money(stay.paidAmountCentavos)} | Shift: ${stay.shift?.type ?? 'Not recorded'}`,
       )
       .text(
         `Arrival: ${arrival(stay)} | Guest: ${stay.guestName ?? 'Not recorded'}`,
@@ -158,6 +159,7 @@ export async function createStayHistoryWorkbook(
       header('Expected checkout'),
       header('Checkout'),
       header('Duration hours'),
+      header('Days'),
       header('Arrival'),
       header('Vehicle type'),
       header('Plate number'),
@@ -180,6 +182,7 @@ export async function createStayHistoryWorkbook(
         ? { value: stay.checkedOutAt, format: 'yyyy-mm-dd hh:mm' }
         : { value: 'Active' },
       { value: stay.durationHours },
+      { value: stay.numberOfDays ?? '' },
       { value: stay.arrivalType === 'WALK_IN' ? 'Walk-in' : 'Vehicle' },
       { value: stay.vehicleType?.replaceAll('_', ' ') ?? '' },
       { value: stay.plateNumber ?? '' },

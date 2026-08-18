@@ -13,20 +13,48 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { bookingWindowsOverlap } from '../services/booking-time.js';
 import { getShiftWindow } from '../services/shift-time.js';
+import {
+  maximumStayDays,
+  resolveStayPricing,
+  StayPricingError,
+} from '../services/stay-pricing.js';
 
-const bookingFields = z.object({
-  bookingDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  estimatedArrivalAt: z.coerce.date().optional().nullable(),
-  roomId: z.number().int().positive().optional().nullable(),
-  expectedDurationHours: z.number().int().positive().max(24),
-  guestName: z.string().trim().max(100).optional().nullable(),
-  contactNumber: z.string().trim().max(30).optional().nullable(),
-  arrivalType: z.nativeEnum(ArrivalType).optional().nullable(),
-  vehicleType: z.nativeEnum(VehicleType).optional().nullable(),
-  plateNumber: z.string().trim().max(30).optional().nullable(),
-  bookingReference: z.string().trim().max(50).optional().nullable(),
-  notes: z.string().trim().max(500).optional().nullable(),
-});
+const bookingFields = z
+  .object({
+    bookingDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    estimatedArrivalAt: z.coerce.date().optional().nullable(),
+    roomId: z.number().int().positive().optional().nullable(),
+    expectedDurationHours: z
+      .number()
+      .int()
+      .positive()
+      .max(maximumStayDays * 24),
+    numberOfDays: z.number().int().positive().max(maximumStayDays).optional(),
+    guestName: z.string().trim().max(100).optional().nullable(),
+    contactNumber: z.string().trim().max(30).optional().nullable(),
+    arrivalType: z.nativeEnum(ArrivalType).optional().nullable(),
+    vehicleType: z.nativeEnum(VehicleType).optional().nullable(),
+    plateNumber: z.string().trim().max(30).optional().nullable(),
+    bookingReference: z.string().trim().max(50).optional().nullable(),
+    notes: z.string().trim().max(500).optional().nullable(),
+  })
+  .superRefine((value, context) => {
+    if (
+      value.numberOfDays !== undefined &&
+      value.expectedDurationHours !== value.numberOfDays * 24
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'The booking duration must match the selected number of days.',
+      });
+    }
+    if (value.numberOfDays === undefined && value.expectedDurationHours > 24) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Hourly booking packages cannot exceed 24 hours.',
+      });
+    }
+  });
 
 const statusSchema = z.object({
   status: z.enum([
@@ -38,7 +66,11 @@ const statusSchema = z.object({
 
 const conversionSchema = z.object({
   roomId: z.number().int().positive().optional(),
-  paymentMethod: z.enum([PaymentMethod.CASH, PaymentMethod.GCASH]),
+  paymentMethod: z.enum([
+    PaymentMethod.CASH,
+    PaymentMethod.GCASH,
+    PaymentMethod.CARD,
+  ]),
   arrivalType: z.nativeEnum(ArrivalType).optional(),
   vehicleType: z.nativeEnum(VehicleType).optional().nullable(),
 });
@@ -86,6 +118,7 @@ function bookingData(input: BookingInput) {
     estimatedArrivalAt: input.estimatedArrivalAt ?? null,
     roomId: input.roomId ?? null,
     expectedDurationHours: input.expectedDurationHours,
+    numberOfDays: input.numberOfDays ?? null,
     guestName: optionalText(input.guestName),
     contactNumber: optionalText(input.contactNumber),
     arrivalType: input.arrivalType ?? null,
@@ -109,7 +142,10 @@ async function validateRoomAndConflict(
 ): Promise<void> {
   if (!input.roomId) {
     const offeredRate = await transaction.stayRate.findFirst({
-      where: { durationHours: input.expectedDurationHours },
+      where: {
+        durationHours:
+          input.numberOfDays === undefined ? input.expectedDurationHours : 24,
+      },
       select: { id: true },
     });
     if (!offeredRate) {
@@ -133,7 +169,9 @@ async function validateRoomAndConflict(
   }
   if (
     !room.roomType.rates.some(
-      (rate) => rate.durationHours === input.expectedDurationHours,
+      (rate) =>
+        rate.durationHours ===
+        (input.numberOfDays === undefined ? input.expectedDurationHours : 24),
     )
   ) {
     throw new BookingRuleError(
@@ -259,6 +297,7 @@ export function createBookingsRouter(prisma: PrismaClient): Router {
                 bookingDate: body.data.bookingDate,
                 estimatedArrivalAt: created.estimatedArrivalAt,
                 expectedDurationHours: created.expectedDurationHours,
+                numberOfDays: created.numberOfDays,
               },
             },
           });
@@ -486,18 +525,19 @@ export function createBookingsRouter(prisma: PrismaClient): Router {
           ) {
             throw new BookingRuleError('This room is already occupied.', 409);
           }
-          const rate =
-            room.rateOverrides.find(
-              (item) => item.durationHours === booking.expectedDurationHours,
-            ) ??
-            room.roomType.rates.find(
-              (item) => item.durationHours === booking.expectedDurationHours,
+          let pricing;
+          try {
+            pricing = resolveStayPricing(
+              room,
+              booking.numberOfDays != null
+                ? { numberOfDays: booking.numberOfDays }
+                : { durationHours: booking.expectedDurationHours },
             );
-          if (!rate) {
-            throw new BookingRuleError(
-              'The booked duration is not offered for this room.',
-              400,
-            );
+          } catch (error: unknown) {
+            if (error instanceof StayPricingError) {
+              throw new BookingRuleError(error.message, 400);
+            }
+            throw error;
           }
           const checkedInAt = new Date();
           const shiftWindow = getShiftWindow(checkedInAt);
@@ -529,12 +569,13 @@ export function createBookingsRouter(prisma: PrismaClient): Router {
                   ? booking.plateNumber
                   : null,
               notes: booking.notes,
-              durationHours: booking.expectedDurationHours,
-              paidAmountCentavos: rate.amountCentavos,
+              durationHours: pricing.durationHours,
+              numberOfDays: pricing.numberOfDays,
+              rateAmountCentavos: pricing.rateAmountCentavos,
+              paidAmountCentavos: pricing.totalAmountCentavos,
               checkedInAt,
               expectedCheckoutAt: new Date(
-                checkedInAt.getTime() +
-                  booking.expectedDurationHours * 60 * 60 * 1000,
+                checkedInAt.getTime() + pricing.durationHours * 60 * 60 * 1000,
               ),
             },
           });
@@ -543,7 +584,7 @@ export function createBookingsRouter(prisma: PrismaClient): Router {
               stayId: stay.id,
               handledById: request.authUser.id,
               transactionType: FinancialTransactionType.ROOM_CHARGE,
-              amountCentavos: rate.amountCentavos,
+              amountCentavos: pricing.totalAmountCentavos,
               paymentMethod: body.data.paymentMethod,
               note: `Booking ${booking.bookingReference ?? `#${booking.id}`}`,
             },
@@ -567,7 +608,9 @@ export function createBookingsRouter(prisma: PrismaClient): Router {
               details: {
                 roomId: room.id,
                 stayId: stay.id,
-                amountCentavos: rate.amountCentavos,
+                numberOfDays: pricing.numberOfDays,
+                rateAmountCentavos: pricing.rateAmountCentavos,
+                amountCentavos: pricing.totalAmountCentavos,
                 paymentMethod: body.data.paymentMethod,
               },
             },
