@@ -2,6 +2,7 @@ import {
   lazy,
   Suspense,
   type FormEvent,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -21,6 +22,7 @@ import {
   Pencil,
   ShoppingBasket,
   ReceiptText,
+  PackageSearch,
   Users,
 } from 'lucide-react';
 import { getOccupancyStatus, type OccupancyStatus } from './stay-status';
@@ -32,6 +34,7 @@ import { MiniStoreView } from './MiniStoreView';
 import type { RevenueTrendPoint } from './RevenueCharts';
 import { StoreReportView } from './StoreReportView';
 import { ExpensesView } from './ExpensesView';
+import { LostFoundView } from './LostFoundView';
 
 const RevenueCharts = lazy(() =>
   import('./RevenueCharts').then((module) => ({
@@ -46,6 +49,7 @@ type View =
   | 'bookings'
   | 'store'
   | 'expenses'
+  | 'lost-found'
   | 'history'
   | 'reports'
   | 'shifts'
@@ -201,11 +205,13 @@ export default function App() {
   const [editRoom, setEditRoom] = useState<Room | null>(null);
   const [checkInRoom, setCheckInRoom] = useState<Room | null>(null);
   const [extendRoom, setExtendRoom] = useState<Room | null>(null);
+  const [lostFoundRoomId, setLostFoundRoomId] = useState<number | null>(null);
   const [now, setNow] = useState(Date.now());
   const [soundReady, setSoundReady] = useState(false);
   const [isOnline, setIsOnline] = useState(() => navigator.onLine);
   const audioContext = useRef<AudioContext | null>(null);
   const lastStayAlert = useRef(new Map<number, number>());
+  const clearLostFoundRoom = useCallback(() => setLostFoundRoomId(null), []);
 
   async function loadInventory(): Promise<void> {
     setError(null);
@@ -568,6 +574,14 @@ export default function App() {
           <ReceiptText size={20} />
           <span>Expenses</span>
         </button>
+        <button
+          className={view === 'lost-found' ? 'active' : ''}
+          onClick={() => selectView('lost-found')}
+          title="Lost & Found"
+        >
+          <PackageSearch size={20} />
+          <span>Lost &amp; Found</span>
+        </button>
         {user.role === 'OWNER' && (
           <button
             className={view === 'reports' ? 'active' : ''}
@@ -840,6 +854,19 @@ export default function App() {
                           )}
                         </select>
                       </label>
+                      {room.operationalStatus === 'CLEANING' && (
+                        <button
+                          className="secondary-button report-found-item-button"
+                          type="button"
+                          onClick={() => {
+                            setLostFoundRoomId(room.id);
+                            selectView('lost-found');
+                          }}
+                        >
+                          <PackageSearch size={16} aria-hidden="true" />
+                          Report found item
+                        </button>
+                      )}
                     </article>
                   );
                 })}
@@ -861,6 +888,13 @@ export default function App() {
           <MiniStoreView isOwner={user.role === 'OWNER'} rooms={rooms} />
         ) : view === 'expenses' ? (
           <ExpensesView isOwner={user.role === 'OWNER'} />
+        ) : view === 'lost-found' ? (
+          <LostFoundView
+            role={user.role}
+            rooms={rooms}
+            initialRoomId={lostFoundRoomId}
+            onInitialRoomHandled={clearLostFoundRoom}
+          />
         ) : view === 'reports' ? (
           <ReportsView />
         ) : view === 'shifts' ? (

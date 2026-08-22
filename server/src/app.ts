@@ -19,6 +19,7 @@ import { createProductsRouter } from './routes/products.js';
 import { createStoreSalesRouter } from './routes/store-sales.js';
 import { createStoreReportsRouter } from './routes/store-reports.js';
 import { createExpensesRouter } from './routes/expenses.js';
+import { createLostFoundRouter } from './routes/lost-found.js';
 import {
   createProductImagesRouter,
   productImageDirectory,
@@ -73,6 +74,7 @@ export function createApp(
     app.use('/api/products', createProductsRouter(databaseClient));
     app.use('/api/store-sales', createStoreSalesRouter(databaseClient));
     app.use('/api/expenses', createExpensesRouter(databaseClient));
+    app.use('/api/lost-found', createLostFoundRouter(databaseClient));
     app.use('/api/shifts', requireOwner, createShiftsRouter(databaseClient));
     app.use(
       '/api/reports/store',

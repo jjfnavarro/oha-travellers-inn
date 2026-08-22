@@ -24,6 +24,7 @@
 - Cloud-managed and local-server deployment options
 - Tested Docker MySQL backup and isolated restore scripts
 - Android tablet-first responsive layouts with desktop, laptop, and mobile support
+- Searchable Lost & Found records with optional completed-stay links, claim processing, Owner-only disposal, and audit history
 - Configurable Store and extra-charge catalog with Owner-only management
 - Cash/GCash store purchases with optional active-stay linking
 - Idempotent, atomic store sales with immutable product and price snapshots

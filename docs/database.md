@@ -11,6 +11,7 @@ The application uses MySQL through Prisma. Amounts are stored as integer centavo
 - `FinancialTransaction`: authoritative room, extension, store, and extra-charge payments
 - `StaffAccount` and `Session`: accounts and login sessions
 - `AuditLog`: staff actions
+- `LostFoundItem`: operational records for belongings found in rooms
 - `Shift`: automatic Day and Night shift windows
 
 ## Booking Relationships
@@ -36,6 +37,19 @@ Room operational status includes Active, Cleaning, Maintenance, and Inactive. Ch
 Each purchase creates one `StoreSale`, one or more `StoreSaleItem` records, and one matching `FinancialTransaction` in a single database transaction. The sale has a unique UUID idempotency key so retrying the same request cannot create another charge. A sale may optionally reference an active stay; the room is reached through that stay and is not duplicated on the sale.
 
 Each item copies the product name, category, unit price, quantity, and line total used at purchase time. These snapshots and the ledger amount remain unchanged when the Owner later edits the product. Uploaded product images are stored in the configured filesystem directory and only their paths are stored in MySQL. Image binary data is never stored in MySQL.
+
+## Lost & Found
+
+`LostFoundItem` requires a room and may optionally reference a completed stay
+when staff can identify it reliably. It permanently records the staff account
+that created the entry and any account that later processes a claim or
+disposal. Room, stay, and staff foreign keys use restricted deletion so
+operational history remains available after a room is archived or an account
+is deactivated.
+
+Lost & Found statuses move from Unclaimed to either Claimed or Disposed. These
+records never create financial transactions and do not affect revenue,
+expenses, payment-method totals, or reports.
 
 ## Local Inspection
 

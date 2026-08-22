@@ -65,6 +65,12 @@ enum ExpenseStatus {
   VOIDED
 }
 
+enum LostFoundStatus {
+  UNCLAIMED
+  CLAIMED
+  DISPOSED
+}
+
 enum ProductCategory {
   STORE_PRODUCT
   EXTRA_CHARGE
@@ -125,6 +131,7 @@ model Room {
   rateOverrides     RoomRateOverride[]
   stays             Stay[]
   bookings          Booking[]
+  lostFoundItems    LostFoundItem[]
   createdAt         DateTime              @default(now())
   updatedAt         DateTime              @updatedAt
 
@@ -160,6 +167,7 @@ model Stay {
   financialTransactions FinancialTransaction[]
   storeSales            StoreSale[]
   booking               Booking?
+  lostFoundItems         LostFoundItem[]
   createdAt             DateTime               @default(now())
   updatedAt             DateTime               @updatedAt
 
@@ -189,6 +197,9 @@ model StaffAccount {
   handledStoreSales   StoreSale[]
   recordedExpenses    Expense[]              @relation("ExpenseRecordedBy")
   voidedExpenses      Expense[]              @relation("ExpenseVoidedBy")
+  recordedLostFoundItems LostFoundItem[]      @relation("LostFoundRecordedBy")
+  claimedLostFoundItems  LostFoundItem[]      @relation("LostFoundClaimProcessedBy")
+  disposedLostFoundItems LostFoundItem[]      @relation("LostFoundDisposedBy")
   createdAt           DateTime               @default(now())
   updatedAt           DateTime               @updatedAt
 }
@@ -381,4 +392,37 @@ model Expense {
   @@index([shiftId, createdAt])
   @@index([recordedById, createdAt])
   @@index([voidedById])
+}
+
+model LostFoundItem {
+  id                   Int              @id @default(autoincrement())
+  itemName             String           @db.VarChar(100)
+  description          String?          @db.VarChar(1000)
+  roomId               Int
+  room                 Room             @relation(fields: [roomId], references: [id], onDelete: Restrict)
+  stayId               Int?
+  stay                 Stay?            @relation(fields: [stayId], references: [id], onDelete: Restrict)
+  foundAt              DateTime
+  recordedById         Int
+  recordedBy           StaffAccount     @relation("LostFoundRecordedBy", fields: [recordedById], references: [id], onDelete: Restrict)
+  status               LostFoundStatus  @default(UNCLAIMED)
+  notes                String?          @db.VarChar(1000)
+  claimedAt            DateTime?
+  claimedByName        String?          @db.VarChar(100)
+  claimNotes           String?          @db.VarChar(1000)
+  claimProcessedById   Int?
+  claimProcessedBy     StaffAccount?    @relation("LostFoundClaimProcessedBy", fields: [claimProcessedById], references: [id], onDelete: Restrict)
+  disposedAt           DateTime?
+  disposalNotes        String?          @db.VarChar(1000)
+  disposedById         Int?
+  disposedBy           StaffAccount?    @relation("LostFoundDisposedBy", fields: [disposedById], references: [id], onDelete: Restrict)
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+
+  @@index([status, foundAt])
+  @@index([roomId, foundAt])
+  @@index([stayId])
+  @@index([recordedById, createdAt])
+  @@index([claimProcessedById])
+  @@index([disposedById])
 }

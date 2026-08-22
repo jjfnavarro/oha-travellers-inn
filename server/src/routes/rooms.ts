@@ -387,7 +387,9 @@ export function createRoomsRouter(prisma: PrismaClient): Router {
           where: { id: id.data },
           include: {
             roomType: { select: { name: true } },
-            _count: { select: { stays: true, bookings: true } },
+            _count: {
+              select: { stays: true, bookings: true, lostFoundItems: true },
+            },
           },
         });
         if (!room) throw new RoomRateRuleError('Room not found.', 404);
@@ -401,6 +403,7 @@ export function createRoomsRouter(prisma: PrismaClient): Router {
         if (
           room._count.stays > 0 ||
           room._count.bookings > 0 ||
+          room._count.lostFoundItems > 0 ||
           operationalHistory > 0
         ) {
           throw new RoomRateRuleError(

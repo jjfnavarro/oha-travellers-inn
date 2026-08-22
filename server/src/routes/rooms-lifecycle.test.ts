@@ -33,7 +33,7 @@ function unusedRoom() {
     displayOrder: 35,
     operationalStatus: RoomOperationalStatus.ACTIVE,
     roomType: { name: 'Standard' },
-    _count: { stays: 0, bookings: 0 },
+    _count: { stays: 0, bookings: 0, lostFoundItems: 0 },
   };
 }
 
@@ -132,6 +132,30 @@ describe('room lifecycle', () => {
     const transaction = {
       room: { findUnique: vi.fn().mockResolvedValue(room), delete: vi.fn() },
       auditLog: { count: vi.fn().mockResolvedValue(1), create: vi.fn() },
+    };
+    const prisma = {
+      session: {
+        findUnique: vi.fn().mockResolvedValue(session(StaffRole.OWNER)),
+      },
+      $transaction: vi.fn(async (callback: (client: unknown) => unknown) =>
+        callback(transaction),
+      ),
+    } as unknown as PrismaClient;
+    const response = await request(createApp(environment, vi.fn(), prisma))
+      .delete('/api/rooms/35')
+      .set('Cookie', 'oha_session=test');
+    expect(response.status).toBe(409);
+    expect(transaction.room.delete).not.toHaveBeenCalled();
+  });
+
+  test('room with Lost & Found history cannot be hard-deleted', async () => {
+    const room = {
+      ...unusedRoom(),
+      _count: { stays: 0, bookings: 0, lostFoundItems: 1 },
+    };
+    const transaction = {
+      room: { findUnique: vi.fn().mockResolvedValue(room), delete: vi.fn() },
+      auditLog: { count: vi.fn().mockResolvedValue(0), create: vi.fn() },
     };
     const prisma = {
       session: {
